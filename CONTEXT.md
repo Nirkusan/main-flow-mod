@@ -34,6 +34,9 @@ The fixed point a code review compares against, `main` unless changed.
 **Alias**:
 Another skill name that counts as a step's command, such as `grilling` for the grill step.
 
+**Catch-up**:
+Finding progress made before the pane was watching (earlier in the transcript, or in the spec and ticket files) and adding it. Catch-up only ever adds; it never undoes a step.
+
 **Project**:
 The folder a session runs in. Progress belongs to a project and outlives the session.
 
@@ -42,6 +45,7 @@ The folder a session runs in. Progress belongs to a project and outlives the ses
 - A **Project** has at most one **Flow** in progress.
 - A **Flow** has many **Steps**; a **Step** is done by a **Run** of one of its commands.
 - In the **Full flow**, the implement **Step** is done when every **Ticket** has been implemented.
+- A **Feature** has one spec and, in the **Full flow**, many **Tickets**.
 
 ## Flagged ambiguities
 
