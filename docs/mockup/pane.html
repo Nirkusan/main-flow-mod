@@ -118,6 +118,7 @@
         <div class="head"><div class="select" style="color:var(--dim)">Choose a flow</div><div class="btn-quiet-box">Reset</div></div>
         <div class="about"><strong>Full</strong><p>Builds that span sessions: spec, tickets, one /implement per ticket.</p></div>
         <div class="about"><strong>Quick</strong><p>Fits one session: spec, then implement straight away.</p></div>
+        <div class="about"><strong>Bug</strong><p>Something is broken: diagnose it, then ask what would have prevented it.</p></div>
         <div class="card">
           <div class="title"><h2>Grill</h2><span class="meta">Start here</span></div>
           <code>/grill-with-docs</code>
@@ -194,6 +195,30 @@
       </div>
     </div>
     <figcaption>Mockup. Quick flow at review. The Base field appears only here.</figcaption>
+  </figure>
+
+  <!-- Bug flow -->
+  <figure id="bug">
+    <div class="pane">
+      <div class="bar"><span>Main flow</span><span>⤢✕</span></div>
+      <div class="body">
+        <div class="head"><div class="select">Bug</div><div class="btn-quiet-box">Reset</div></div>
+        <div class="card">
+          <div class="title"><h2>Retro</h2><span class="meta">Step 2 of 2</span></div>
+          <code>/retro</code>
+          <p class="hint">Ask what would have prevented this bug, in this same session.</p>
+          <div class="primary">Copy command</div>
+          <span class="quiet">Skip step</span>
+        </div>
+        <div class="progress"><i style="width:50%"></i></div>
+        <ul>
+          <li class="done"><b>✓</b><span>Diagnose</span></li>
+          <li class="current"><b>●</b><span>Retro</span></li>
+          <li class="opt">+ Optional: improve architecture</li>
+        </ul>
+      </div>
+    </div>
+    <figcaption>Mockup. Bug flow, after the diagnosis.</figcaption>
   </figure>
 
   <!-- 4. Feature change confirm -->
