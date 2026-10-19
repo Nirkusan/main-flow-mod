@@ -1,4 +1,5 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 const PANE = {
   plugin: 'main-flow',
@@ -16,9 +17,32 @@ const PANE = {
 
 const COMMAND = { command: 'main-flow', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
+// The project folder and the plugin's store, which every hook that saves progress reads.
+const world = (on: On, cwd = '/work/shop') => {
+  mock.store(on)
+  on('session.cwd', () => ({ value: cwd }))
+}
+
+// A session starting in `cwd`, as the engine raises it after a launch, a resume or a new window.
+const sessions = (on: On) => {
+  let cwd = '/work/shop'
+  mock.store(on)
+  on('session.cwd', () => ({ value: cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+
+  return (folder: string) => {
+    cwd = folder
+
+    return { cwd: folder, surface: 'desktop', isInteractive: true } as const
+  }
+}
+
 const skillOk = () => ({ result: { success: true, commandName: 'skill' } })
 
-test('with no flow the pane offers the first command', async $ => {
+test('with no flow the pane offers the first command', async ($, on) => {
+  world(on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /Builds that span sessions/ })).toBeDefined()
@@ -27,7 +51,8 @@ test('with no flow the pane offers the first command', async $ => {
   }
 })
 
-test('choosing a flow shows the next command first', async $ => {
+test('choosing a flow shows the next command first', async ($, on) => {
+  world(on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.select({ key: 'flow', value: 'quick' })
@@ -38,7 +63,8 @@ test('choosing a flow shows the next command first', async $ => {
   }
 })
 
-test('skip moves to the next step', async $ => {
+test('skip moves to the next step', async ($, on) => {
+  world(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.select({ key: 'flow', value: 'full' })
   await ui.press({ key: 'skip' })
@@ -49,6 +75,7 @@ test('skip moves to the next step', async $ => {
 })
 
 test('a Skill call advances the flow, picking Full when none is chosen', async ($, on) => {
+  world(on)
   on('tool.call', skillOk)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await $.tool.call({ tool: 'Skill', skill: 'grilling', args: '' })
@@ -63,6 +90,7 @@ const typed = (name: string, args = '') =>
   ({ text: `/${name} ${args}`.trim(), command: { name, args } }) as never
 
 test('typing a slash command advances the flow', async ($, on) => {
+  world(on)
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.select({ key: 'flow', value: 'quick' })
@@ -76,6 +104,7 @@ test('typing a slash command advances the flow', async ($, on) => {
 })
 
 test('a failed Skill call does not count', async ($, on) => {
+  world(on)
   on('tool.call', () => ({ result: { success: false }, isError: true }))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.select({ key: 'flow', value: 'full' })
@@ -86,6 +115,7 @@ test('a failed Skill call does not count', async ($, on) => {
 })
 
 test('finishing a flow offers Start again', async ($, on) => {
+  world(on)
   on('tool.call', skillOk)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.select({ key: 'flow', value: 'quick' })
@@ -99,7 +129,8 @@ test('finishing a flow offers Start again', async ($, on) => {
   await ui.unmount()
 })
 
-test('mobile picks the flow with buttons', async $ => {
+test('mobile picks the flow with buttons', async ($, on) => {
+  world(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
   await ui.press({ key: 'flow-quick' })
   expect(await ui.find({ type: 'Text', text: 'Step 1 of 5' })).toBeDefined()
@@ -108,6 +139,7 @@ test('mobile picks the flow with buttons', async $ => {
 })
 
 test('/main-flow prints the flow where no pane is placed', async ($, on) => {
+  world(on)
   on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface' } }))
   const out = await $.command.run({ ...COMMAND, args: 'quick' })
   expect(out.text).toContain('Next: Grill (step 1 of 5)')
@@ -116,16 +148,38 @@ test('/main-flow prints the flow where no pane is placed', async ($, on) => {
 })
 
 test('/main-flow says the pane opened where it is placed', async ($, on) => {
+  world(on)
   on('ui.open', () => ({ value: { isPlaced: true } }))
   expect((await $.command.run({ ...COMMAND, args: '' })).text).toBe('Main flow pane opened.')
 })
 
 test('an alias from the settings counts as its step', { options: { aliases: 'grill=interview-me' } }, async ($, on) => {
+  world(on)
   on('tool.call', skillOk)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.select({ key: 'flow', value: 'quick' })
   await $.tool.call({ tool: 'Skill', skill: 'my-plugin:interview-me', args: '' })
   expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/to-spec')
   await ui.press({ key: 'reset' })
+  await ui.unmount()
+})
+
+test('progress is kept per project across sessions', async ($, on) => {
+  on('tool.call', skillOk)
+  const startIn = sessions(on)
+  await $.session.start(startIn('/work/shop'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.select({ key: 'flow', value: 'quick' })
+  await $.tool.call({ tool: 'Skill', skill: 'grilling', args: '' })
+
+  await $.session.start(startIn('/work/blog'))
+  expect(await ui.find({ type: 'Text', text: /Builds that span sessions/ })).toBeDefined()
+
+  await $.session.start(startIn('/work/shop'))
+  expect(await ui.find({ type: 'Text', text: 'Step 2 of 5' })).toBeDefined()
+
+  await ui.press({ key: 'reset' })
+  await $.session.start(startIn('/work/shop'))
+  expect(await ui.find({ type: 'Text', text: /Builds that span sessions/ })).toBeDefined()
   await ui.unmount()
 })

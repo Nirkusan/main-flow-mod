@@ -4,9 +4,9 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Every change to flow, runs, marks, feature or base is saved to `$.store` under a key derived from the project folder
-- [ ] `session.start` restores the saved progress for this project
-- [ ] A different project folder starts empty
-- [ ] Reset clears the saved progress too
+- [x] Every change to flow, runs, marks, feature or base is saved to `$.store` under a key derived from the project folder
+- [x] `session.start` restores the saved progress for this project
+- [x] A different project folder starts empty
+- [x] Reset clears the saved progress too

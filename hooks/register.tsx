@@ -10,10 +10,37 @@ const TITLE = 'Main flow'
 
 const EMPTY: Project = { flow: null, runs: [], feature: '', base: 'main', ticketCount: 0 }
 
-const project = atom({ plugin: 'main-flow', key: 'project' } as const, EMPTY)
+const PROJECT = { plugin: 'main-flow', key: 'project' } as const
+const project = atom(PROJECT, EMPTY)
+
+// Progress belongs to the project folder and outlives the session, so it is kept in the store too.
+const storeKey = (cwd: string) => `project:${cwd}`
+
+const isProject = (value: unknown): value is Project =>
+  typeof value === 'object' && value !== null && Array.isArray((value as Project).runs)
+
+const saved = async ($: EngineInterface, cwd: string): Promise<Project> => {
+  const value = await $.store.get(storeKey(cwd))
+
+  return isProject(value) ? { ...EMPTY, ...value } : EMPTY
+}
 
 const change = async ($: EngineInterface, fn: (p: Project) => Project) => {
+  const cwd = await $.session.cwd()
+
+  // After a /clear the session's values start over while the store still holds the project.
+  if ((await $.state.get(PROJECT)).version === 0) {
+    await $.state.set(PROJECT, await saved($, cwd))
+  }
+
   await update($, project, p => fn(p ?? EMPTY))
+  await $.store.set(storeKey(cwd), await read($, project))
+}
+
+const current = async ($: EngineInterface) => {
+  const held = await $.state.get(PROJECT)
+
+  return held.version === 0 ? saved($, await $.session.cwd()) : (held.value ?? EMPTY)
 }
 
 const tickets = async (_$: EngineInterface): Promise<Ticket[]> => []
@@ -65,6 +92,7 @@ export const register: Register = (on, options) => {
   const aliases = aliasTable(typeof options.aliases === 'string' ? options.aliases : '')
 
   on('session.start', async ($, e, next) => {
+    await $.state.set(PROJECT, await saved($, e.cwd))
     await $.command.register({
       name: 'main-flow',
       description: 'Show the main flow and the next command',
@@ -88,7 +116,7 @@ export const register: Register = (on, options) => {
 
     const opened = await $.ui.open({ id: PANE, title: TITLE })
 
-    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await read($, project), await tickets($)) }
+    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await current($), await tickets($)) }
   })
 
   // The person typing a slash command.
@@ -117,7 +145,7 @@ export const register: Register = (on, options) => {
     // The mobile app draws no Input or Select, the terminal no Svg.
     const Select = e.surface !== 'mobile' && 'Select' in els ? els.Select : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in els ? els.Svg : undefined
-    const p = await read($, project)
+    const p = await current($)
     const known = await tickets($)
 
     const header = (
