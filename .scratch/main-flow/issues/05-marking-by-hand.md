@@ -4,8 +4,8 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tapping a ticket row toggles it done or undone
-- [ ] Tapping a required step marks it and every earlier step done; tapping a done step undoes it
-- [ ] With no ticket files, the Implement card shows a Tickets count field (text on mobile); rows read "Ticket 1…n"; a bare `/implement` marks the next one
+- [x] Tapping a ticket row toggles it done or undone
+- [x] Tapping a required step marks it and every earlier step done; tapping a done step undoes it
+- [x] With no ticket files, the Implement card shows a Tickets count field (text on mobile); rows read "Ticket 1…n"; a bare `/implement` marks the next one

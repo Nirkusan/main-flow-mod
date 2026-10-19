@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { Project, StepId, Ticket } from '../types'
+import type { Project, Run, StepId, Ticket } from '../types'
 import { FLOWS, aliasTable, describeFlow, isFlowId, parseInvocation, parseTicket, record, resolveTicket, summarize } from './flows'
 import type { Row, Summary } from './flows'
 
@@ -330,6 +330,19 @@ export const register: Register = (on, options) => {
             {s.next.sub}
           </Text>
         ) : undefined}
+        {s.next.step.id === 'implement' && p.flow === 'full' && known.length === 0 ? (
+          Input ? (
+            <Input
+              key="ticket-count"
+              label="Tickets"
+              placeholder="How many tickets"
+              value={p.ticketCount > 0 ? String(p.ticketCount) : ''}
+              onSubmit={(value: string) => change($, q => ({ ...q, ticketCount: Math.max(0, Math.floor(Number(value)) || 0) }))}
+            />
+          ) : (
+            <Text dimColor>{`Tickets: ${p.ticketCount > 0 ? p.ticketCount : 'not set'}`}</Text>
+          )
+        ) : undefined}
         <Code source={s.next.command} language="text" wrap="wrap" />
         <Text dimColor>{s.next.hint}</Text>
         <Button
@@ -362,19 +375,28 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    const mark = (extra: Partial<Run> & Pick<Run, 'step'>) =>
+      change($, q => ({ ...q, runs: [...q.runs, { name: 'hand', by: 'hand', ...extra }] }))
+
     const row = (r: Row, i: number) => {
       switch (r.kind) {
         case 'step':
           return (
             <Box key={`row-${i}`} flexDirection="row" justifyContent="space-between">
-              <Text
-                weight={r.status === 'current' ? 'semibold' : 'regular'}
-                color={r.status === 'current' ? 'claude' : undefined}
-                dimColor={r.status === 'done' || r.status === 'skipped'}
-                strikethrough={r.status === 'skipped'}
+              <Button
+                key={`step-${r.step}`}
+                plain
+                onPress={() => mark({ step: r.step, ...(r.status === 'done' && { undo: true }) })}
               >
-                {`${MARKS[r.status]}  ${r.label}`}
-              </Text>
+                <Text
+                  weight={r.status === 'current' ? 'semibold' : 'regular'}
+                  color={r.status === 'current' ? 'claude' : undefined}
+                  dimColor={r.status === 'done' || r.status === 'skipped'}
+                  strikethrough={r.status === 'skipped'}
+                >
+                  {`${MARKS[r.status]}  ${r.label}`}
+                </Text>
+              </Button>
               {r.count ? (
                 <Text dimColor size="footnote">
                   {r.count}
@@ -384,20 +406,31 @@ export const register: Register = (on, options) => {
           )
         case 'optional':
           return (
-            <Text key={`row-${i}`} dimColor size="footnote">
-              {`   +  Optional: ${r.isDone ? '✓ ' : ''}${r.label}`}
-            </Text>
+            <Button
+              key={`step-${r.step}`}
+              plain
+              onPress={() => mark({ step: r.step, ...(r.isDone && { undo: true }) })}
+            >
+              <Text dimColor size="footnote">
+                {`   +  Optional: ${r.isDone ? '✓ ' : ''}${r.label}`}
+              </Text>
+            </Button>
           )
         case 'ticket':
           return (
-            <Text
-              key={`row-${i}`}
-              size="footnote"
-              weight={r.status === 'current' ? 'semibold' : 'regular'}
-              dimColor={r.status === 'done' || r.status === 'skipped'}
+            <Button
+              key={`ticket-${r.id}`}
+              plain
+              onPress={() => mark({ step: 'implement', ticket: r.id, ...(r.status === 'done' && { undo: true }) })}
             >
-              {`   ${MARKS[r.status]}  ${r.id} ${r.title}`}
-            </Text>
+              <Text
+                size="footnote"
+                weight={r.status === 'current' ? 'semibold' : 'regular'}
+                dimColor={r.status === 'done' || r.status === 'skipped'}
+              >
+                {`   ${MARKS[r.status]}  ${r.id} ${r.title}`}
+              </Text>
+            </Button>
           )
         case 'detour':
           return (

@@ -266,3 +266,41 @@ describe('resolveTicket', () => {
     expect(resolveTicket(parseInvocation('implement', '03')!, at, [])).toBeUndefined()
   })
 })
+
+describe('marking by hand', () => {
+  const hand = (step: Run['step'], extra: Partial<Run> = {}): Run => ({ step, name: 'hand', by: 'hand', ...extra })
+
+  test('marking a step marks every step before it, tickets included', () => {
+    const s = summarize(atImplement([hand('review')]), TICKETS)
+    expect(s.next?.step.id).toBe('retro')
+    expect(s.rows.find(r => r.kind === 'step' && r.step === 'implement')).toMatchObject({ status: 'done', count: '4 of 4 done' })
+  })
+
+  test('unmarking a done step makes it current again', () => {
+    const s = summarize(atImplement([hand('spec', { undo: true })]), TICKETS)
+    expect(s.next?.step.id).toBe('spec')
+  })
+
+  test('marking the optional prototype touches nothing else', () => {
+    const s = summarize(project({ runs: [hand('prototype')] }))
+    expect(s.rows[1]).toMatchObject({ kind: 'optional', isDone: true })
+    expect(s.next?.step.id).toBe('grill')
+  })
+
+  test('a ticket row toggles its ticket', () => {
+    expect(summarize(atImplement([hand('implement', { ticket: '02' })]), TICKETS).tickets.done).toBe(1)
+    expect(
+      summarize(atImplement([hand('implement', { ticket: '02' }), hand('implement', { ticket: '02', undo: true })]), TICKETS).tickets
+        .done,
+    ).toBe(0)
+  })
+
+  test('without ticket files the count set by hand drives implement', () => {
+    const at = project({ ticketCount: 3, runs: [...ran('grill-with-docs', 'to-spec', 'to-tickets'), ...ran('implement')] })
+    const s = summarize(at)
+    expect(s.next?.meta).toBe('Step 4 of 6')
+    expect(s.next?.sub).toBe('Ticket 2 of 3')
+    expect(s.rows.find(r => r.kind === 'step' && r.step === 'implement')).toMatchObject({ count: '1 of 3 done' })
+    expect(summarize({ ...at, runs: [...at.runs, ...ran('implement', 'implement')] }).next?.step.id).toBe('review')
+  })
+})

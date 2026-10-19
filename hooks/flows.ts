@@ -221,6 +221,8 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
       if (run.ticket !== undefined) {
         run.undo ? r.tickets.delete(run.ticket) : r.tickets.set(run.ticket, 'done')
         settleImplement(i)
+      } else if (step.isOptional) {
+        r.statuses[i] = run.undo ? 'todo' : 'done'
       } else if (run.undo) {
         r.statuses[i] = 'todo'
 
@@ -229,13 +231,19 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
           r.builds = 0
         }
       } else {
-        passTo(i, 'done')
-        r.statuses[i] = 'done'
+        // Marking a step by hand marks the steps before it too, except those skipped on purpose.
+        steps.forEach((s, j) => {
+          if (s.isOptional || j > i || (j < i && r.statuses[j] !== 'todo')) {
+            return
+          }
 
-        if (step.id === 'implement') {
-          tickets.forEach(t => r.tickets.set(t.id, 'done'))
-          r.builds = Math.max(r.builds, project.ticketCount, 1)
-        }
+          r.statuses[j] = 'done'
+
+          if (s.id === 'implement') {
+            tickets.forEach(t => r.tickets.has(t.id) || r.tickets.set(t.id, 'done'))
+            r.builds = Math.max(r.builds, project.ticketCount, 1)
+          }
+        })
       }
 
       continue
