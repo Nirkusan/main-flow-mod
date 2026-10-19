@@ -304,3 +304,27 @@ describe('marking by hand', () => {
     expect(summarize({ ...at, runs: [...at.runs, ...ran('implement', 'implement')] }).next?.step.id).toBe('review')
   })
 })
+
+describe('review', () => {
+  test('a code review while tickets remain is part of implement', () => {
+    const s = summarize(atImplement([...built('01'), ...ran('code-review')]), TICKETS)
+    expect(s.next?.ticket?.id).toBe('02')
+    expect(s.rows.find(r => r.kind === 'step' && r.step === 'review')).toMatchObject({ status: 'todo' })
+  })
+
+  test('the review /implement runs on the last ticket completes review', () => {
+    const s = summarize(atImplement([...built('01', '02', '03', '04'), ...ran('code-review')]), TICKETS)
+    expect(s.next?.step.id).toBe('retro')
+  })
+
+  test('in Quick a code review before implement does not count', () => {
+    const s = summarize(project({ flow: 'quick', runs: ran('grill-with-docs', 'to-spec', 'code-review') }))
+    expect(s.next?.step.id).toBe('implement')
+  })
+
+  test('the review command compares against the base', () => {
+    const at = project({ flow: 'quick', base: 'develop', runs: ran('grill-with-docs', 'to-spec', 'implement') })
+    expect(summarize(at).next?.command).toBe('/code-review develop')
+    expect(summarize({ ...at, base: ' ' }).next?.command).toBe('/code-review main')
+  })
+})

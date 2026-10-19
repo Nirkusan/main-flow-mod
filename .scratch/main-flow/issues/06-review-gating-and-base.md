@@ -4,9 +4,9 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A review command counts only while the implement step is complete
-- [ ] In Full, the code review run during the last ticket's `/implement` completes Review
-- [ ] Base field (default `main`) appears only in the Review card; text on mobile
-- [ ] Review command reads `/code-review <base>`
+- [x] A review command counts only while the implement step is complete
+- [x] In Full, the code review run during the last ticket's `/implement` completes Review
+- [x] Base field (default `main`) appears only in the Review card; text on mobile
+- [x] Review command reads `/code-review <base>`

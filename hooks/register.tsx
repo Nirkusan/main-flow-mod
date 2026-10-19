@@ -330,6 +330,19 @@ export const register: Register = (on, options) => {
             {s.next.sub}
           </Text>
         ) : undefined}
+        {s.next.step.id === 'review' ? (
+          Input ? (
+            <Input
+              key="base"
+              label="Base"
+              placeholder="Branch or commit to compare against"
+              value={p.base}
+              onSubmit={(value: string) => change($, q => ({ ...q, base: value.trim() || 'main' }))}
+            />
+          ) : (
+            <Text dimColor>{`Base: ${p.base}`}</Text>
+          )
+        ) : undefined}
         {s.next.step.id === 'implement' && p.flow === 'full' && known.length === 0 ? (
           Input ? (
             <Input

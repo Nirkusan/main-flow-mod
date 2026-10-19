@@ -306,3 +306,26 @@ test('without ticket files the person sets the ticket count', async ($, on) => {
   await ui.press({ key: 'reset' })
   await ui.unmount()
 })
+
+test('the Base field shows only when review is next and fills its command', async ($, on) => {
+  world(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.select({ key: 'flow', value: 'quick' })
+  expect(await ui.find({ key: 'base' })).toBeUndefined()
+  await ui.press({ key: 'step-implement' })
+  expect((await ui.find({ key: 'base' }))?.props.value).toBe('main')
+  await ui.input({ key: 'base', text: 'develop' })
+  expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/code-review develop')
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})
+
+test('mobile shows the base as text', async ($, on) => {
+  world(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  await ui.press({ key: 'flow-quick' })
+  await ui.press({ key: 'step-implement' })
+  expect(await ui.find({ type: 'Text', text: 'Base: main' })).toBeDefined()
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})
