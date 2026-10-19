@@ -1,0 +1,11 @@
+{
+  "name": "main-flow",
+  "version": "0.1.0",
+  "description": "A pane that tracks Matt Pocock's idea-to-ship flow and suggests the next command",
+  "author": {
+    "name": "Nirkusan"
+  },
+  "repository": "https://github.com/Nirkusan/main-flow-mod",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

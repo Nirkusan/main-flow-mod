@@ -1,0 +1,5 @@
+{
+  "name": "main-flow",
+  "owner": { "name": "Nirkusan" },
+  "plugins": [{ "name": "main-flow", "source": "./" }]
+}

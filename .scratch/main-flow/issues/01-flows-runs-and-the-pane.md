@@ -4,14 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Manifest, marketplace file, hooks list, state contract and tsconfig in the template's structure; `claude plugin validate` passes and `tsc` type-checks
-- [ ] Full (grill, spec, tickets, implement, review, retro) and Quick (grill, spec, implement, review, retro) flows, with an optional prototype row after grill
-- [ ] Typed slash commands and successful Skill calls record runs; failed or denied Skill calls do not
-- [ ] The first main-flow command with no flow chosen picks Full; switching flows recomputes progress from the runs
-- [ ] Next-step card: name, "Step n of m", command in a code block, the step's hint line, full-width Copy command, quiet Skip step
-- [ ] Progress bar (text bar in the terminal), step list with ✓ ● ○ –, toast on completion, Start again and Reset
-- [ ] No-flow state describes both flows and offers `/grill-with-docs` with Copy
-- [ ] Mobile shows flow buttons instead of the dropdown
-- [ ] `/main-flow`, `/main-flow full|quick|reset`; text output when the pane is not placed
+- [x] Manifest, marketplace file, hooks list, state contract and tsconfig in the template's structure; `claude plugin validate` passes and `tsc` type-checks
+- [x] Full (grill, spec, tickets, implement, review, retro) and Quick (grill, spec, implement, review, retro) flows, with an optional prototype row after grill
+- [x] Typed slash commands and successful Skill calls record runs; failed or denied Skill calls do not
+- [x] The first main-flow command with no flow chosen picks Full; switching flows recomputes progress from the runs
+- [x] Next-step card: name, "Step n of m", command in a code block, the step's hint line, full-width Copy command, quiet Skip step
+- [x] Progress bar (text bar in the terminal), step list with ✓ ● ○ –, toast on completion, Start again and Reset
+- [x] No-flow state describes both flows and offers `/grill-with-docs` with Copy
+- [x] Mobile shows flow buttons instead of the dropdown
+- [x] `/main-flow`, `/main-flow full|quick|reset`; text output when the pane is not placed
