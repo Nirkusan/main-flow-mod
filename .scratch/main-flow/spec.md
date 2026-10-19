@@ -8,7 +8,7 @@ Matt Pocock's main flow (grill, spec, tickets, implement, review, retro) has bra
 
 ## Solution
 
-A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow command, ready to copy, with the arguments filled in. It records each step as the person types the slash command or as Claude invokes the skill, follows the Full and Quick branches, tracks tickets one by one from the tracker's ticket files, and keeps progress per project across `/clear` and sessions. It catches up on progress made before it was watching, from the transcript and from the spec and ticket files. Where no pane can be drawn (cloud sessions), `/main-flow` prints the same information as text.
+A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow command (or, in the Bug flow, the next bug-hunt command), ready to copy, with the arguments filled in. It records each step as the person types the slash command or as Claude invokes the skill, follows the Full and Quick branches, tracks tickets one by one from the tracker's ticket files, and keeps progress per project across `/clear` and sessions. It catches up on progress made before it was watching, from the transcript and from the spec and ticket files. Where no pane can be drawn (cloud sessions), `/main-flow` prints the same information as text.
 
 ## User Stories
 
@@ -64,6 +64,12 @@ A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow
 50. As a developer in the terminal, I want a text progress bar in place of the drawn one, so that the pane works without Svg.
 51. As a developer, I want a failed or denied Skill call not to count, so that only real runs advance the flow.
 52. As a maintainer, I want the version bumped on each release, so that `claude plugin update` picks up changes.
+53. As a developer with something broken, I want a Bug flow, diagnose then retro, so that the pane guides a bug hunt too.
+54. As a developer on the Bug flow, I want the diagnose hint to say "No theories until one command goes red on this bug", so that I hold the skill's key rule.
+55. As a developer on the Bug flow, I want the retro hint to ask what would have prevented the bug, in the same session, so that the lesson lands while the context is fresh.
+56. As a developer whose diagnosis found no good test seam, I want an optional improve-architecture row after retro, so that the follow-up is visible.
+57. As a developer mid-build, I want a diagnosis Claude starts on its own to show as a dim detour row and a toast, without moving my flow, so that a bug doesn't cost me my place.
+58. As a developer with no flow in progress, or a finished one, I want a diagnosis to switch the pane to the Bug flow, so that a bug hunt is tracked from its first command.
 
 ## Implementation Decisions
 
@@ -71,6 +77,8 @@ A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow
 - **One deep, pure module holds the flow logic.** It knows the two flows and their steps, the alias table, how to parse a command name and arguments into a run, how to parse ticket files, how to derive progress, how to build each command, how to read catch-up from transcript messages and files, and how to print the flow as text. Its central function takes the recorded state (flow, runs, ticket marks, feature, base) and the known tickets, and returns everything the pane and the text mode draw: per-step statuses, the next step or ticket and its command and hint, step number and totals, the progress fraction, and the rows of the step list. Nothing in it touches the engine.
 - **The hooks module is thin.** It records runs from `prompt.submit` (typed slash commands) and `tool.call` on Skill (after a successful call), scans ticket files with `$.fs`, reads the transcript with `$.session.messages()`, persists with `$.store`, draws the pane, and answers `/main-flow`.
 - **State.** Session state (`$.state` atoms) drives drawing; on every write it is mirrored to `$.store` under a key derived from the project folder (`$.session.cwd()`), and restored from there at `session.start`. Recorded per project: flow (`full` | `quick` | null), runs (command, args, source), ticket marks (ids done by hand or by run, ids undone by hand), feature, base, and the ticket count used when no files exist.
+- **Three flows.** Full (grill, spec, tickets, implement, review, retro), Quick (grill, spec, implement, review, retro), Bug (diagnose, retro, then an optional improve-architecture). Prototype is optional after grill in Full and Quick. Diagnose is `diagnosing-bugs`; improve architecture is `improve-codebase-architecture`. The Bug flow shows no Feature field.
+- **Detours.** A diagnose run while Full or Quick is in progress and not complete leaves the flow where it is: it adds a dim "Diagnosed a bug" row after the step that was current and toasts. With no flow, or a complete one, it picks the Bug flow (starting a fresh run list).
 - **Runs, not statuses, are the record.** Progress is always derived from the run list plus ticket marks, which is what lets a flow switch recompute and lets catch-up merge forward by adding runs.
 - **Alias resolution.** A skill name is stripped of any `plugin:` prefix, lowercased, then looked up in the built-in table merged with the user's aliases. The user's aliases come from one `userConfig` string field, `aliases`, in the form `step=name, step=name`.
 - **Review gating.** A review-step command counts only when the implement step is complete at that moment; otherwise it is ignored for progress.
@@ -79,8 +87,8 @@ A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow
 - **Catch-up.** It runs at `session.start` and when Feature changes. It reads typed commands from user messages (the `<command-name>` tag or a leading `/name`) and Skill tool uses from assistant messages, and reads the spec file and ticket files' `Status:` lines. It turns each finding into runs or ticket marks and adds only those that would advance progress, then toasts a one-line summary when anything was added.
 - **Steps by hand.** Tapping a required step records a hand-mark run for it and every earlier step; tapping a done step records an undo for that step. Tapping a ticket row toggles its mark.
 - **Feature change.** Editing Feature while any progress exists shows an inline confirm (Clear / Keep); Clear empties runs and marks and keeps the new feature. With Feature empty, a single `.scratch/*/issues` folder fills it.
-- **Commands built by the pane.** Grill `/grill-with-docs`; prototype `/prototype`; spec `/to-spec`; tickets `/to-tickets`; implement `/implement <ticket file path>` (or `/implement` with no files); review `/code-review <base>`; retro `/retro`.
-- **Hint lines carry the context rules.** Spec: "When the interview ends, turn it into a spec in this same window." Tickets: "Split the spec into tickets. Stay in this context window until it's done." Implement (Full): "Run /clear first: each ticket starts fresh." Retro: "Run it before you /clear, in the session it looks back on."
+- **Commands built by the pane.** Diagnose `/diagnosing-bugs`; improve architecture `/improve-codebase-architecture`; grill `/grill-with-docs`; prototype `/prototype`; spec `/to-spec`; tickets `/to-tickets`; implement `/implement <ticket file path>` (or `/implement` with no files); review `/code-review <base>`; retro `/retro`.
+- **Hint lines carry the context rules.** Spec: "When the interview ends, turn it into a spec in this same window." Tickets: "Split the spec into tickets. Stay in this context window until it's done." Implement (Full): "Run /clear first: each ticket starts fresh." Retro: "Run it before you /clear, in the session it looks back on." Diagnose: "No theories until one command goes red on this bug." Retro (Bug): "Ask what would have prevented this bug, in this same session."
 - **Surfaces.** Branch on `e.surface`: mobile draws no Input or Select (buttons and read-only text instead), the terminal draws no Svg (text bar instead).
 - **Pane layout** follows the confirmed mockup (`docs/mockup/pane.html`) and brief (`.scratch/main-flow/pane-brief.md`).
 
@@ -95,7 +103,8 @@ A Claude Code mod, `main-flow`, that shows a side pane naming the next main-flow
 
 - Reading GitHub issues over the network (ticket count is set by hand there).
 - Tracking more than one feature at a time per project.
-- On-ramps and side flows (triage, diagnosing-bugs, wayfinder, improve-codebase-architecture), and `/handoff` between phases.
+- The triage and wayfinder on-ramps, and `/handoff` between phases. (Triage's output already merges into implement.)
+- Showing diagnosing-bugs' internal phases; the pane only sees that the skill ran.
 - Detecting when a grilling interview has ended.
 - Running commands for the person; the pane only copies them.
 

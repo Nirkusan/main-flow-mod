@@ -5,7 +5,7 @@ The vocabulary of the main-flow mod: a pane that tracks where you are in Matt Po
 ## Language
 
 **Flow**:
-An ordered list of steps from idea to ship. There are two: Full and Quick.
+An ordered list of steps toward shipping. There are three: Full, Quick and Bug.
 _Avoid_: workflow, pipeline
 
 **Full flow**:
@@ -13,6 +13,12 @@ The flow for a build that spans sessions: grill, spec, tickets, implement, revie
 
 **Quick flow**:
 The flow for a build that fits one session: grill, spec, implement, review, retro. It has no tickets.
+
+**Bug flow**:
+The flow for something broken: diagnose, then retro, with an optional architecture follow-up.
+
+**Detour**:
+A diagnosis made while a Full or Quick flow is in progress. It is noted but does not move the flow.
 
 **Step**:
 One stage of a flow, done by running one of its commands.
