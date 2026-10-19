@@ -360,6 +360,7 @@ export const register: Register = (on, options) => {
           key="feature"
           label="Feature"
           placeholder="Feature slug, e.g. checkout"
+          submitLabel="set"
           value={p.feature}
           onSubmit={(value: string) => setFeature($, aliases, value)}
         />
@@ -403,6 +404,7 @@ export const register: Register = (on, options) => {
               key="base"
               label="Base"
               placeholder="Branch or commit to compare against"
+              submitLabel="set"
               value={p.base}
               onSubmit={(value: string) => change($, q => ({ ...q, base: value.trim() || DEFAULT_BASE }))}
             />
@@ -416,6 +418,7 @@ export const register: Register = (on, options) => {
               key="ticket-count"
               label="Tickets"
               placeholder="How many tickets"
+              submitLabel="set"
               value={p.ticketCount > 0 ? String(p.ticketCount) : ''}
               onSubmit={(value: string) => change($, q => ({ ...q, ticketCount: Math.max(0, Math.floor(Number(value)) || 0) }))}
             />
@@ -455,6 +458,9 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // What a screen reader says for a row, in place of its mark.
+    const STATUS_WORDS = { done: 'done', current: 'next', skipped: 'skipped', todo: 'to do' } as const
+
     const mark = (extra: Partial<Run> & Pick<Run, 'step'>) =>
       change($, q => ({ ...q, runs: [...q.runs, { name: 'hand', by: 'hand', ...extra }] }))
 
@@ -465,6 +471,7 @@ export const register: Register = (on, options) => {
             <Box key={`row-${i}`} flexDirection="row" justifyContent="space-between">
               <Button
                 key={`step-${r.step}`}
+                label={`${r.label}, ${STATUS_WORDS[r.status]}`}
                 plain
                 onPress={() => mark({ step: r.step, ...(r.status === 'done' && { undo: true }) })}
               >
@@ -488,6 +495,7 @@ export const register: Register = (on, options) => {
           return (
             <Button
               key={`step-${r.step}`}
+              label={`Optional ${r.label}, ${r.isDone ? 'done' : 'not run'}`}
               plain
               onPress={() => mark({ step: r.step, ...(r.isDone && { undo: true }) })}
             >
@@ -500,6 +508,7 @@ export const register: Register = (on, options) => {
           return (
             <Button
               key={`ticket-${r.id}`}
+              label={`Ticket ${r.id} ${r.title}, ${STATUS_WORDS[r.status]}`}
               plain
               onPress={() => mark({ step: 'implement', ticket: r.id, ...(r.status === 'done' && { undo: true }) })}
             >

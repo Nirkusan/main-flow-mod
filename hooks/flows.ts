@@ -632,11 +632,14 @@ export const record = (
   const summary = summarize(after, tickets)
 
   if (invocation.step === 'diagnose' && project.flow !== 'bug') {
-    return { project: after, toast: `Diagnosed a bug. Back to: ${summary.next?.heading.toLowerCase() ?? 'the flow'}` }
+    return { project: after, toast: `Diagnosed a bug. Back to: ${nextName(summary) ?? 'the flow'}` }
   }
 
   return { project: after, toast: toastFor(before, summary, run) }
 }
+
+// The next step as a toast names it: a step in lower case, a ticket as written.
+const nextName = (s: Summary) => s.next && (s.next.ticket ? s.next.heading : s.next.heading.toLowerCase())
 
 const toastFor = (before: Summary | undefined, after: Summary, run: Run) => {
   const doneBefore = before?.requiredDone ?? 0
@@ -649,7 +652,7 @@ const toastFor = (before: Summary | undefined, after: Summary, run: Run) => {
   if (after.requiredDone > doneBefore) {
     const label = after.flow.steps.find(s => s.id === run.step)?.label ?? before?.next?.step.label ?? 'Step'
 
-    return after.next ? `${label} done. Next: ${after.next.heading.toLowerCase()}` : `${label} done. Flow complete`
+    return after.next ? `${label} done. Next: ${nextName(after)}` : `${label} done. Flow complete`
   }
 
   if (after.tickets.done > ticketsBefore && run.ticket !== undefined && run.ticket !== '*') {

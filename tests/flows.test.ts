@@ -483,3 +483,10 @@ describe('review fixes', () => {
     expect(at.runs.length).toBe(253)
   })
 })
+
+describe('polish', () => {
+  test('a toast names the next ticket as written', () => {
+    const before = project({ feature: 'checkout', runs: ran('grill-with-docs', 'to-spec') })
+    expect(record(before, parseInvocation('to-tickets', '')!, TICKETS).toast).toBe('Tickets done. Next: 01 Cart model')
+  })
+})
