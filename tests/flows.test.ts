@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Project, Run } from '../types'
-import { ALIASES, aliasTable, describeFlow, parseInvocation, parseTicket, record, resolveTicket, summarize } from '../hooks/flows'
+import {
+  ALIASES,
+  aliasTable,
+  catchUp,
+  describeFlow,
+  parseInvocation,
+  parseTicket,
+  record,
+  resolveTicket,
+  summarize,
+} from '../hooks/flows'
 import type { Ticket } from '../types'
 
 const project = (over: Partial<Project> = {}): Project => ({
@@ -149,11 +159,12 @@ describe('describeFlow', () => {
   })
 })
 
-const ticket = (id: string, title: string, blockedBy: number[] = []): Ticket => ({
+const ticket = (id: string, title: string, blockedBy: number[] = [], status = 'ready-for-agent'): Ticket => ({
   id,
   title,
   path: `.scratch/checkout/issues/${id}-${title.toLowerCase().replace(/ /g, '-')}.md`,
   blockedBy,
+  status,
 })
 
 const TICKETS = [ticket('01', 'Cart model'), ticket('02', 'Cart API', [1]), ticket('03', 'Pay button', [2]), ticket('04', 'Receipt email', [1])]
@@ -171,6 +182,7 @@ describe('parseTicket', () => {
       title: 'Pay button',
       path: '.scratch/checkout/issues/03-pay-button.md',
       blockedBy: [1, 2],
+      status: 'ready-for-agent',
     })
   })
 
@@ -361,5 +373,57 @@ describe('bug flow', () => {
     const s = summarize(after)
     expect(s.next?.step.id).toBe('spec')
     expect(s.rows.findIndex(r => r.kind === 'detour')).toBe(s.rows.findIndex(r => r.kind === 'step' && r.step === 'spec') + 1)
+  })
+})
+
+describe('catchUp', () => {
+  const typedRow = (name: string, args = '') => ({
+    role: 'user' as const,
+    text: `<command-message>${name} is running…</command-message>\n<command-name>/${name}</command-name>\n<command-args>${args}</command-args>`,
+    toolUses: [],
+  })
+  const skillRow = (skill: string, args = '') => ({
+    role: 'assistant' as const,
+    text: '',
+    toolUses: [{ tool_use_id: 't1', tool: 'Skill', input: { skill, args } }],
+  })
+
+  test('picks up commands typed and skills invoked earlier in the session', () => {
+    const { project: after, picked } = catchUp(project({ flow: null }), [], {
+      messages: [typedRow('grill-with-docs'), skillRow('mattpocock-skills:to-spec'), { role: 'user', text: '/commit', toolUses: [] }],
+      hasSpec: false,
+    })
+    expect(after.flow).toBe('full')
+    expect(picked).toEqual(['Grill', 'Spec'])
+    expect(summarize(after).next?.step.id).toBe('tickets')
+  })
+
+  test('reads a leading slash command in a plain message', () => {
+    const { picked } = catchUp(project(), [], { messages: [{ role: 'user', text: '/grill-me the checkout', toolUses: [] }], hasSpec: false })
+    expect(picked).toEqual(['Grill'])
+  })
+
+  test('the spec file, ticket files and resolved tickets mark progress', () => {
+    const tickets = [ticket('01', 'Cart model', [], 'resolved'), ticket('02', 'Cart API', [1], 'done'), ticket('03', 'Pay button', [2])]
+    const { project: after, picked } = catchUp(project({ runs: ran('grill-with-docs') }), tickets, { messages: [], hasSpec: true })
+    expect(picked).toEqual(['Spec', 'Tickets', '2 tickets'])
+    expect(summarize(after, tickets).next?.ticket?.id).toBe('03')
+  })
+
+  test('only adds: what the pane already has is left alone and not repeated', () => {
+    const at = project({ runs: ran('grill-with-docs', 'to-spec') })
+    const { project: after, picked } = catchUp(at, [], { messages: [typedRow('grill-with-docs'), typedRow('to-spec')], hasSpec: true })
+    expect(picked).toEqual([])
+    expect(after).toBe(at)
+  })
+
+  test('a bare /implement in the transcript never marks a ticket again', () => {
+    const { picked } = catchUp(atImplement(built('01')), TICKETS, { messages: [typedRow('implement')], hasSpec: true })
+    expect(picked).toEqual([])
+  })
+
+  test('an /implement naming its ticket marks that ticket', () => {
+    const { picked } = catchUp(atImplement(), TICKETS, { messages: [typedRow('implement', '.scratch/checkout/issues/02-cart-api.md')], hasSpec: true })
+    expect(picked).toEqual(['1 ticket'])
   })
 })

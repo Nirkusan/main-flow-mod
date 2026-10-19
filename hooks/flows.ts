@@ -435,6 +435,7 @@ export const parseTicket = (dir: string, file: string, text: string): Ticket | u
     title: heading ?? slug.replace(/-/g, ' '),
     path: `${dir}/${file}`,
     blockedBy: [...blockers.matchAll(/\b\d+\b/g)].map(m => Number(m[0])),
+    status: /^\W*status\W*(.+?)\s*$/im.exec(text)?.[1]?.toLowerCase() ?? '',
   }
 }
 
@@ -452,6 +453,116 @@ export const resolveTicket = (invocation: Invocation, project: Project, tickets:
   const ticket = named === undefined ? undefined : tickets.find(t => Number(t.id) === Number(named))
 
   return ticket?.id ?? progress(project, tickets).nextTicket?.id
+}
+
+// A transcript message as `$.session.messages()` returns it, as far as catch-up reads it.
+export type Message = {
+  role: 'user' | 'assistant'
+  text: string
+  toolUses: readonly { tool: string; input: Record<string, unknown> }[]
+}
+
+// The slash commands typed and the skills invoked in a transcript, in order.
+const invocationsIn = (messages: readonly Message[], aliases: Readonly<Record<string, StepId>>) =>
+  messages.flatMap(m => {
+    if (m.role === 'user') {
+      const tagged = /<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/.exec(m.text)
+      const [name, args] = tagged
+        ? [tagged[1]!, /<command-args>([\s\S]*?)<\/command-args>/.exec(m.text)?.[1] ?? '']
+        : (/^\/(\S+)[ \t]*(.*)/.exec(m.text.trim())?.slice(1) ?? [])
+      const found = name === undefined ? undefined : parseInvocation(name, args ?? '', aliases)
+
+      return found ? [found] : []
+    }
+
+    return m.toolUses.flatMap(use => {
+      const found =
+        use.tool === 'Skill' && typeof use.input.skill === 'string'
+          ? parseInvocation(use.input.skill, typeof use.input.args === 'string' ? use.input.args : '', aliases)
+          : undefined
+
+      return found ? [found] : []
+    })
+  })
+
+const DONE_STATUSES = new Set(['resolved', 'done', 'closed', 'complete', 'completed'])
+
+const score = (s: Summary) =>
+  s.requiredDone * 10_000 + s.tickets.done * 10 + s.rows.filter(r => r.kind === 'optional' && r.isDone).length
+
+// Progress made before the pane was watching, from the transcript and the feature's files. It only ever adds.
+export const catchUp = (
+  project: Project,
+  tickets: readonly Ticket[],
+  found: { messages: readonly Message[]; hasSpec: boolean },
+  aliases: Readonly<Record<string, StepId>> = ALIASES,
+): { project: Project; picked: string[] } => {
+  const candidates: Run[] = []
+
+  for (const invocation of invocationsIn(found.messages, aliases)) {
+    if (invocation.step === 'diagnose' || invocation.name === 'tdd') {
+      continue
+    }
+
+    if (invocation.step === 'implement' && tickets.length > 0) {
+      // Only a reference names its ticket for sure; a bare /implement may already be counted.
+      const named = invocation.name === 'implement-spec' ? '*' : /(?:^|[\s/#])0*(\d+)(?=$|[-\s.])/.exec(invocation.args)?.[1]
+      const id = named === '*' ? '*' : tickets.find(t => named !== undefined && Number(t.id) === Number(named))?.id
+
+      if (id !== undefined) {
+        candidates.push({ step: 'implement', name: invocation.name, ticket: id, by: 'catch-up' })
+      }
+
+      continue
+    }
+
+    if (invocation.step === 'implement' && project.flow === 'full') {
+      continue
+    }
+
+    candidates.push({ step: invocation.step, name: invocation.name, by: 'catch-up' })
+  }
+
+  if (found.hasSpec) {
+    candidates.push({ step: 'spec', name: 'to-spec', by: 'catch-up' })
+  }
+
+  if (tickets.length > 0) {
+    candidates.push({ step: 'tickets', name: 'to-tickets', by: 'catch-up' })
+  }
+
+  for (const t of tickets.filter(t => DONE_STATUSES.has(t.status))) {
+    candidates.push({ step: 'implement', name: 'implement', ticket: t.id, by: 'catch-up' })
+  }
+
+  let current: Project = project
+  const picked: string[] = []
+  let ticketsPicked = 0
+
+  for (const run of candidates) {
+    const trial: Project = { ...current, flow: current.flow ?? 'full', runs: [...current.runs, run] }
+    const before = summarize(current, tickets)
+    const after = summarize(trial, tickets)
+
+    if (score(after) <= score(before)) {
+      continue
+    }
+
+    current = trial
+
+    if (run.ticket !== undefined) {
+      ticketsPicked += after.tickets.done - before.tickets.done
+    } else {
+      const label = after.flow.steps.find(s => s.id === run.step)?.label ?? run.step
+      picked.includes(label) || picked.push(label)
+    }
+  }
+
+  if (ticketsPicked > 0) {
+    picked.push(`${ticketsPicked} ticket${ticketsPicked === 1 ? '' : 's'}`)
+  }
+
+  return { project: current, picked }
 }
 
 const STARTERS = new Set<StepId>(['grill', 'prototype', 'spec', 'tickets', 'implement', 'review', 'retro'])

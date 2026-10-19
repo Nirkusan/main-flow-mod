@@ -4,10 +4,10 @@
 
 **Blocked by:** 03, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Runs at session start and when Feature changes
-- [ ] Reads typed commands from user messages (`<command-name>` tags or a leading `/name`) and Skill tool uses from assistant messages
-- [ ] `.scratch/<feature>/spec.md` marks spec done; ticket files mark tickets done; `Status: resolved` or `done` marks that ticket done
-- [ ] Adds only what advances progress; never removes; toasts "Picked up: …" when anything was added
-- [ ] Fills Feature from a spec folder when Feature is empty
+- [x] Runs at session start and when Feature changes
+- [x] Reads typed commands from user messages (`<command-name>` tags or a leading `/name`) and Skill tool uses from assistant messages
+- [x] `.scratch/<feature>/spec.md` marks spec done; ticket files mark tickets done; `Status: resolved` or `done` marks that ticket done
+- [x] Adds only what advances progress; never removes; toasts "Picked up: …" when anything was added
+- [x] Fills Feature from a spec folder when Feature is empty

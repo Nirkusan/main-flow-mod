@@ -30,6 +30,8 @@ export type Ticket = {
   path: string
   // The numbers of the tickets that must be done first.
   blockedBy: number[]
+  // The file's `Status:` line (`ready-for-agent`, `resolved`), or '' without one.
+  status: string
 }
 
 export type Project = {

@@ -42,6 +42,7 @@ const sessions = (on: On) => {
 // A project's files, answered as `$.fs` would from the folder `cwd`.
 const files = (on: On, tree: Record<string, string>, cwd = '/work/shop') => {
   const rel = (path: string) => path.replace(`${cwd}/`, '').replace(/^\.\//, '').replace(/\/$/, '')
+  on('fs.exists', (_$, e) => ({ value: Object.keys(tree).some(path => path === rel(e.path) || path.startsWith(`${rel(e.path)}/`)) }))
   on('fs.read', (_$, e) => (rel(e.path) in tree ? { value: tree[rel(e.path)]! } : { deny: `${e.path}: missing` }))
   on('fs.list', (_$, e) => {
     const dir = rel(e.path)
@@ -286,8 +287,7 @@ test('tapping a ticket row toggles it', async ($, on) => {
   files(on, CHECKOUT)
   await $.session.start(startIn('/work/shop'))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await ui.select({ key: 'flow', value: 'full' })
-  await ui.press({ key: 'step-tickets' })
+  // Catch-up has already read the spec and ticket files, so Implement is current.
   await ui.press({ key: 'ticket-01' })
   expect(await ui.find({ type: 'Text', text: '02 Cart API' })).toBeDefined()
   await ui.press({ key: 'ticket-01' })
@@ -350,6 +350,29 @@ test('a diagnosis mid-build shows as a detour', async ($, on) => {
   await $.tool.call({ tool: 'Skill', skill: 'diagnosing-bugs', args: '' })
   expect(await ui.find({ type: 'Text', text: /Diagnosed a bug/ })).toBeDefined()
   expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/to-spec')
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})
+
+test('a session that already ran main-flow commands is picked up at start', async ($, on) => {
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(String(e.text))
+    return { value: undefined }
+  })
+  const startIn = sessions(on)
+  files(on, CHECKOUT)
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: '<command-name>/grill-with-docs</command-name>\n<command-args>checkout</command-args>', toolUses: [] },
+      { role: 'assistant', text: 'Here is the spec.', toolUses: [] },
+    ],
+  }))
+  await $.session.start(startIn('/work/shop'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'feature' }))?.props.value).toBe('checkout')
+  expect(await ui.find({ type: 'Text', text: '01 Cart model' })).toBeDefined()
+  expect(toasts).toContain('Picked up: Grill, Spec, Tickets')
   await ui.press({ key: 'reset' })
   await ui.unmount()
 })

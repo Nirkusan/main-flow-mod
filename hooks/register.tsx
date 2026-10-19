@@ -2,8 +2,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import type { Project, Run, StepId, Ticket } from '../types'
-import { FLOWS, aliasTable, describeFlow, isFlowId, parseInvocation, parseTicket, record, resolveTicket, summarize } from './flows'
-import type { Row, Summary } from './flows'
+import {
+  FLOWS,
+  aliasTable,
+  catchUp,
+  describeFlow,
+  isFlowId,
+  parseInvocation,
+  parseTicket,
+  record,
+  resolveTicket,
+  summarize,
+} from './flows'
+import type { Message, Row, Summary } from './flows'
 
 const PANE = 'main-flow'
 const TITLE = 'Main flow'
@@ -75,7 +86,9 @@ const scan = async ($: EngineInterface) => {
     const features: string[] = []
 
     for (const entry of await listDir($, root)) {
-      if (entry.kind === 'dir' && (await listDir($, `${root}/${entry.name}/issues`)).length > 0) {
+      const inside = entry.kind === 'dir' ? await listDir($, `${root}/${entry.name}`) : []
+
+      if (inside.some(f => (f.name === 'issues' && f.kind === 'dir') || f.name === 'spec.md')) {
         features.push(entry.name)
       }
     }
@@ -92,7 +105,34 @@ const scan = async ($: EngineInterface) => {
   await $.state.set(TICKETS, found.sort((a, b) => Number(a.id) - Number(b.id)))
 }
 
-const setFeature = async ($: EngineInterface, value: string, keepProgress?: boolean) => {
+// Adds progress made before the pane was watching: earlier in this transcript, or in the feature's files.
+const pickUp = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>) => {
+  const p = await current($)
+  let messages: Message[] = []
+  let hasSpec = false
+
+  try {
+    messages = (await $.session.messages()) as Message[]
+  } catch {}
+
+  try {
+    hasSpec = p.feature !== '' && (await $.fs.exists(`${await $.session.cwd()}/.scratch/${p.feature}/spec.md`))
+  } catch {}
+
+  const { project: caught, picked } = catchUp(p, await read($, tickets), { messages, hasSpec }, aliases)
+
+  if (picked.length > 0) {
+    await change($, () => caught)
+    $.ui.toast(`Picked up: ${picked.join(', ')}`)
+  }
+}
+
+const setFeature = async (
+  $: EngineInterface,
+  aliases: Readonly<Record<string, StepId>>,
+  value: string,
+  keepProgress?: boolean,
+) => {
   const feature = value.trim()
   const p = await current($)
 
@@ -109,6 +149,7 @@ const setFeature = async ($: EngineInterface, value: string, keepProgress?: bool
   await $.state.set(PENDING, null)
   await change($, q => ({ ...q, feature, runs: keepProgress ? q.runs : [] }))
   await scan($)
+  await pickUp($, aliases)
 }
 
 const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>, command: string, args: string) => {
@@ -160,6 +201,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.state.set(PROJECT, await saved($, e.cwd))
     await scan($)
+    await pickUp($, aliases)
     await $.command.register({
       name: 'main-flow',
       description: 'Show the main flow and the next command',
@@ -294,7 +336,7 @@ export const register: Register = (on, options) => {
           label="Feature"
           placeholder="Feature slug, e.g. checkout"
           value={p.feature}
-          onSubmit={(value: string) => setFeature($, value)}
+          onSubmit={(value: string) => setFeature($, aliases, value)}
         />
       ) : (
         <Text dimColor>{`Feature: ${p.feature === '' ? 'none yet' : p.feature}`}</Text>
@@ -307,8 +349,8 @@ export const register: Register = (on, options) => {
             New feature clears progress.
           </Text>
           <Box flexDirection="row" gap={1}>
-            <Button key="feature-clear" label="Clear" onPress={() => setFeature($, pending, false)} />
-            <Button key="feature-keep" label="Keep" onPress={() => setFeature($, pending, true)} />
+            <Button key="feature-clear" label="Clear" onPress={() => setFeature($, aliases, pending, false)} />
+            <Button key="feature-keep" label="Keep" onPress={() => setFeature($, aliases, pending, true)} />
           </Box>
         </Box>
       )
