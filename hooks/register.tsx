@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { Project, StepId } from '../types'
-import { FLOWS, aliasTable, describeFlow, isFlowId, parseInvocation, record, summarize } from './flows'
-import type { Row, Summary, Ticket } from './flows'
+import type { Project, StepId, Ticket } from '../types'
+import { FLOWS, aliasTable, describeFlow, isFlowId, parseInvocation, parseTicket, record, resolveTicket, summarize } from './flows'
+import type { Row, Summary } from './flows'
 
 const PANE = 'main-flow'
 const TITLE = 'Main flow'
@@ -43,7 +43,73 @@ const current = async ($: EngineInterface) => {
   return held.version === 0 ? saved($, await $.session.cwd()) : (held.value ?? EMPTY)
 }
 
-const tickets = async (_$: EngineInterface): Promise<Ticket[]> => []
+const TICKETS = { plugin: 'main-flow', key: 'tickets' } as const
+const tickets = atom(TICKETS, [])
+const PENDING = { plugin: 'main-flow', key: 'pendingFeature' } as const
+const pendingFeature = atom(PENDING, null)
+
+const listDir = async ($: EngineInterface, path: string) => {
+  try {
+    return await $.fs.list(path)
+  } catch {
+    return []
+  }
+}
+
+// `dir` is relative to the project folder, so the ticket's path reads as the person would type it.
+const readTicket = async ($: EngineInterface, cwd: string, dir: string, file: string): Promise<Ticket | undefined> => {
+  try {
+    return parseTicket(dir, file, String(await $.fs.read(`${cwd}/${dir}/${file}`)))
+  } catch {
+    return undefined
+  }
+}
+
+// Reads the feature's ticket files, filling Feature in when `.scratch` holds exactly one feature with tickets.
+const scan = async ($: EngineInterface) => {
+  let { feature } = await current($)
+  const cwd = await $.session.cwd()
+  const root = `${cwd}/.scratch`
+
+  if (feature === '') {
+    const features: string[] = []
+
+    for (const entry of await listDir($, root)) {
+      if (entry.kind === 'dir' && (await listDir($, `${root}/${entry.name}/issues`)).length > 0) {
+        features.push(entry.name)
+      }
+    }
+
+    if (features.length === 1) {
+      feature = features[0]!
+      await change($, p => ({ ...p, feature }))
+    }
+  }
+
+  const dir = `.scratch/${feature}/issues`
+  const entries = feature === '' ? [] : (await listDir($, `${root}/${feature}/issues`)).filter(e => e.kind === 'file')
+  const found = (await Promise.all(entries.map(e => readTicket($, cwd, dir, e.name)))).filter(t => t !== undefined)
+  await $.state.set(TICKETS, found.sort((a, b) => Number(a.id) - Number(b.id)))
+}
+
+const setFeature = async ($: EngineInterface, value: string, keepProgress?: boolean) => {
+  const feature = value.trim()
+  const p = await current($)
+
+  if (feature === p.feature) {
+    return
+  }
+
+  if (keepProgress === undefined && p.runs.length > 0) {
+    await $.state.set(PENDING, feature)
+
+    return
+  }
+
+  await $.state.set(PENDING, null)
+  await change($, q => ({ ...q, feature, runs: keepProgress ? q.runs : [] }))
+  await scan($)
+}
 
 const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>, command: string, args: string) => {
   const invocation = parseInvocation(command, args, aliases)
@@ -52,10 +118,10 @@ const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>
     return
   }
 
-  const known = await tickets($)
+  const known = await read($, tickets)
   let toast: string | undefined
   await change($, p => {
-    const result = record(p, invocation, known)
+    const result = record(p, invocation, known, resolveTicket(invocation, p, known))
     toast = result.toast
 
     return result.project
@@ -93,6 +159,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.state.set(PROJECT, await saved($, e.cwd))
+    await scan($)
     await $.command.register({
       name: 'main-flow',
       description: 'Show the main flow and the next command',
@@ -116,7 +183,7 @@ export const register: Register = (on, options) => {
 
     const opened = await $.ui.open({ id: PANE, title: TITLE })
 
-    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await current($), await tickets($)) }
+    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await current($), await read($, tickets)) }
   })
 
   // The person typing a slash command.
@@ -126,6 +193,14 @@ export const register: Register = (on, options) => {
     }
 
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Ticket files appear and change while Claude works, so read them again after each turn.
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    await scan($)
+
+    return done
   }).catch(($, e, next) => next(e))
 
   // Claude invoking a skill itself.
@@ -143,10 +218,12 @@ export const register: Register = (on, options) => {
     const els = $.ui.resolve(e)
     const { Box, Button, Code, Text } = els
     // The mobile app draws no Input or Select, the terminal no Svg.
+    const Input = e.surface !== 'mobile' && 'Input' in els ? els.Input : undefined
     const Select = e.surface !== 'mobile' && 'Select' in els ? els.Select : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in els ? els.Svg : undefined
     const p = await current($)
-    const known = await tickets($)
+    const known = await read($, tickets)
+    const pending = await read($, pendingFeature)
 
     const header = (
       <Box flexDirection="row" gap={1} alignItems="center">
@@ -209,6 +286,32 @@ export const register: Register = (on, options) => {
     }
 
     const s = summarize(p, known)
+
+    const featureField =
+      p.flow === 'bug' ? undefined : Input ? (
+        <Input
+          key="feature"
+          label="Feature"
+          placeholder="Feature slug, e.g. checkout"
+          value={p.feature}
+          onSubmit={(value: string) => setFeature($, value)}
+        />
+      ) : (
+        <Text dimColor>{`Feature: ${p.feature === '' ? 'none yet' : p.feature}`}</Text>
+      )
+
+    const confirm =
+      pending === null ? undefined : (
+        <Box key="confirm" flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Text dimColor size="footnote">
+            New feature clears progress.
+          </Text>
+          <Box flexDirection="row" gap={1}>
+            <Button key="feature-clear" label="Clear" onPress={() => setFeature($, pending, false)} />
+            <Button key="feature-keep" label="Keep" onPress={() => setFeature($, pending, true)} />
+          </Box>
+        </Box>
+      )
 
     const next = s.next ? (
       <Box key="next" flexDirection="column" gap={1}>
@@ -308,6 +411,8 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" gap={1}>
         {header}
+        {featureField}
+        {confirm}
         {next}
         {Svg ? (
           <Svg

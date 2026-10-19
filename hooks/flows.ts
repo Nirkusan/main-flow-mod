@@ -1,4 +1,4 @@
-import type { FlowId, Project, Run, StepId } from '../types'
+import type { FlowId, Project, Run, StepId, Ticket } from '../types'
 
 export type Step = {
   id: StepId
@@ -10,14 +10,6 @@ export type Step = {
 export type Flow = { id: FlowId; label: string; summary: string; steps: readonly Step[] }
 
 export type Status = 'done' | 'skipped' | 'current' | 'todo'
-
-export type Ticket = {
-  // The number the file starts with, as written (`03`).
-  id: string
-  title: string
-  path: string
-  blockedBy: string[]
-}
 
 const GRILL: Step = { id: 'grill', label: 'Grill', hint: 'Get interviewed about the plan. Decisions land in the glossary and ADRs.' }
 const PROTOTYPE: Step = { id: 'prototype', label: 'Prototype', hint: 'Settle a question that needs runnable code.', isOptional: true }
@@ -166,7 +158,13 @@ const implementDone = (project: Project, tickets: readonly Ticket[], r: Pick<Rep
 const frontier = (tickets: readonly Ticket[], state: ReadonlyMap<string, unknown>) => {
   const open = tickets.filter(t => !state.has(t.id))
 
-  return open.find(t => t.blockedBy.every(b => state.has(b) || !tickets.some(o => o.id === b))) ?? open[0]
+  const isDone = (n: number) => {
+    const blocker = tickets.find(t => Number(t.id) === n)
+
+    return blocker === undefined || state.has(blocker.id)
+  }
+
+  return open.find(t => t.blockedBy.every(isDone)) ?? open[0]
 }
 
 export const progress = (project: Project, tickets: readonly Ticket[] = []): Progress => {
@@ -410,6 +408,42 @@ export const summarize = (project: Project, tickets: readonly Ticket[] = []): Su
     fraction: required.length === 0 ? 0 : (passed + partial) / required.length,
     tickets: { done: doneTickets, total },
   }
+}
+
+// A ticket file as the pane lists it, or undefined for a file that is not a numbered ticket.
+export const parseTicket = (dir: string, file: string, text: string): Ticket | undefined => {
+  const match = /^(\d+)-(.+)\.md$/.exec(file)
+
+  if (!match) {
+    return undefined
+  }
+
+  const [, id = '', slug = ''] = match
+  const heading = /^#\s+\d+\s*[:.-]\s*(.+?)\s*$/m.exec(text)?.[1]
+  const blockers = /^.*blocked by\b.*$/im.exec(text)?.[0].replace(/^.*?blocked by\W*/i, '') ?? ''
+
+  return {
+    id,
+    title: heading ?? slug.replace(/-/g, ' '),
+    path: `${dir}/${file}`,
+    blockedBy: [...blockers.matchAll(/\b\d+\b/g)].map(m => Number(m[0])),
+  }
+}
+
+// The ticket an /implement run builds: the one its argument names, else the next one; `*` for all of them.
+export const resolveTicket = (invocation: Invocation, project: Project, tickets: readonly Ticket[]) => {
+  if (tickets.length === 0 || invocation.step !== 'implement' || invocation.name === 'tdd') {
+    return undefined
+  }
+
+  if (invocation.name === 'implement-spec') {
+    return '*'
+  }
+
+  const named = /(?:^|[\s/#])0*(\d+)(?=$|[-\s.])/.exec(invocation.args)?.[1]
+  const ticket = named === undefined ? undefined : tickets.find(t => Number(t.id) === Number(named))
+
+  return ticket?.id ?? progress(project, tickets).nextTicket?.id
 }
 
 const STARTERS = new Set<StepId>(['grill', 'prototype', 'spec', 'tickets', 'implement', 'review', 'retro'])

@@ -22,6 +22,16 @@ export type Run = {
   undo?: true
 }
 
+// One ticket file of the feature: `.scratch/<feature>/issues/NN-slug.md`.
+export type Ticket = {
+  // The number the file name starts with, as written (`03`).
+  id: string
+  title: string
+  path: string
+  // The numbers of the tickets that must be done first.
+  blockedBy: number[]
+}
+
 export type Project = {
   flow: FlowId | null
   runs: Run[]
@@ -33,6 +43,6 @@ export type Project = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'main-flow': { project: Project }
+    'main-flow': { project: Project; tickets: Ticket[]; pendingFeature: string | null }
   }
 }

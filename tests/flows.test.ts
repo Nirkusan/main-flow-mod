@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Project, Run } from '../types'
-import { ALIASES, aliasTable, describeFlow, parseInvocation, record, summarize } from '../hooks/flows'
+import { ALIASES, aliasTable, describeFlow, parseInvocation, parseTicket, record, resolveTicket, summarize } from '../hooks/flows'
+import type { Ticket } from '../types'
 
 const project = (over: Partial<Project> = {}): Project => ({
   flow: 'full',
@@ -145,5 +146,123 @@ describe('describeFlow', () => {
     expect(text).toContain('  /to-spec')
     expect(text).toContain('✓ Grill')
     expect(text.indexOf('Next:')).toBeLessThan(text.indexOf('✓ Grill'))
+  })
+})
+
+const ticket = (id: string, title: string, blockedBy: number[] = []): Ticket => ({
+  id,
+  title,
+  path: `.scratch/checkout/issues/${id}-${title.toLowerCase().replace(/ /g, '-')}.md`,
+  blockedBy,
+})
+
+const TICKETS = [ticket('01', 'Cart model'), ticket('02', 'Cart API', [1]), ticket('03', 'Pay button', [2]), ticket('04', 'Receipt email', [1])]
+
+const built = (...ids: string[]): Run[] => ids.map(id => ({ step: 'implement', name: 'implement', ticket: id }))
+
+const atImplement = (runs: Run[] = []) =>
+  project({ feature: 'checkout', runs: [...ran('grill-with-docs', 'to-spec', 'to-tickets'), ...runs] })
+
+describe('parseTicket', () => {
+  test('reads the number, title, path and blockers of a ticket file', () => {
+    const text = '# 03: Pay button\n\n**What to build:** ...\n\n**Blocked by:** 01, 02\n\n**Status:** ready-for-agent\n'
+    expect(parseTicket('.scratch/checkout/issues', '03-pay-button.md', text)).toEqual({
+      id: '03',
+      title: 'Pay button',
+      path: '.scratch/checkout/issues/03-pay-button.md',
+      blockedBy: [1, 2],
+    })
+  })
+
+  test('falls back to the file name for the title and reads no blockers from None', () => {
+    expect(parseTicket('x/issues', '07-promo-codes.md', 'Blocked by: None (can start immediately)')).toMatchObject({
+      title: 'promo codes',
+      blockedBy: [],
+    })
+  })
+
+  test('skips files that are not numbered tickets', () => {
+    expect(parseTicket('x/issues', 'notes.md', '# Notes')).toBeUndefined()
+  })
+})
+
+describe('tickets', () => {
+  test('the implement card leads with the next ticket and its file', () => {
+    const s = summarize(atImplement(), TICKETS)
+    expect(s.next?.heading).toBe('01 Cart model')
+    expect(s.next?.sub).toBe('Implement · ticket 1 of 4')
+    expect(s.next?.command).toBe('/implement .scratch/checkout/issues/01-cart-model.md')
+    expect(s.next?.hint).toBe('Run /clear first: each ticket starts fresh.')
+    expect(s.next?.skipLabel).toBe('Skip ticket')
+  })
+
+  test('the next ticket is the lowest-numbered one whose blockers are done', () => {
+    expect(summarize(atImplement(built('01', '04')), TICKETS).next?.ticket?.id).toBe('02')
+    expect(summarize(atImplement(built('02', '01')), TICKETS).next?.ticket?.id).toBe('03')
+  })
+
+  test('every ticket is a row under Implement while it is current', () => {
+    const s = summarize(atImplement(built('01')), TICKETS)
+    expect(s.rows.find(r => r.kind === 'step' && r.step === 'implement')).toMatchObject({ status: 'current', count: '1 of 4 done' })
+    expect(s.rows.filter(r => r.kind === 'ticket').map(r => r.kind === 'ticket' && r.status)).toEqual(['done', 'current', 'todo', 'todo'])
+  })
+
+  test('implement is done when every ticket is, and the rows collapse', () => {
+    const s = summarize(atImplement(built('01', '02', '03', '04')), TICKETS)
+    expect(s.next?.step.id).toBe('review')
+    expect(s.rows.some(r => r.kind === 'ticket')).toBe(false)
+    expect(s.rows.find(r => r.kind === 'step' && r.step === 'implement')).toMatchObject({ status: 'done', count: '4 of 4 done' })
+  })
+
+  test('implement-spec builds every ticket', () => {
+    const s = summarize(atImplement([{ step: 'implement', name: 'implement-spec', ticket: '*' }]), TICKETS)
+    expect(s.next?.step.id).toBe('review')
+  })
+
+  test('tdd, which /implement runs itself, never marks a ticket', () => {
+    const s = summarize(atImplement([...built('01'), { step: 'implement', name: 'tdd' }]), TICKETS)
+    expect(s.tickets.done).toBe(1)
+  })
+
+  test('skip ticket passes the next ticket', () => {
+    const s = summarize(atImplement([{ step: 'skip', name: 'skip' }]), TICKETS)
+    expect(s.rows.filter(r => r.kind === 'ticket').map(r => r.kind === 'ticket' && r.status)).toEqual(['skipped', 'current', 'todo', 'todo'])
+  })
+
+  test('the progress bar fills ticket by ticket', () => {
+    expect(summarize(atImplement(built('01', '02')), TICKETS).fraction).toBe((3 + 0.5) / 6)
+  })
+
+  test('finishing a ticket toasts the next one', () => {
+    const { toast } = record(atImplement(), parseInvocation('implement', '')!, TICKETS, '01')
+    expect(toast).toBe('Ticket 01 done. Next: 02 Cart API')
+  })
+
+  test('Quick ignores ticket files', () => {
+    const s = summarize(project({ flow: 'quick', runs: ran('grill-with-docs', 'to-spec') }), TICKETS)
+    expect(s.next?.command).toBe('/implement')
+  })
+})
+
+describe('resolveTicket', () => {
+  const at = atImplement(built('01'))
+
+  test('a bare /implement builds the next ticket', () => {
+    expect(resolveTicket(parseInvocation('implement', '')!, at, TICKETS)).toBe('02')
+  })
+
+  test('a reference names its ticket by number, file name, path or issue number', () => {
+    for (const args of ['04', '4', '04-receipt-email.md', '.scratch/checkout/issues/04-receipt-email.md', '#4']) {
+      expect(resolveTicket(parseInvocation('implement', args)!, at, TICKETS)).toBe('04')
+    }
+  })
+
+  test('implement-spec builds them all, and tdd builds none', () => {
+    expect(resolveTicket(parseInvocation('implement-spec', '')!, at, TICKETS)).toBe('*')
+    expect(resolveTicket(parseInvocation('tdd', '')!, at, TICKETS)).toBeUndefined()
+  })
+
+  test('without ticket files there is nothing to name', () => {
+    expect(resolveTicket(parseInvocation('implement', '03')!, at, [])).toBeUndefined()
   })
 })
