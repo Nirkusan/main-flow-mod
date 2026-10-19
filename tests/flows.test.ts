@@ -328,3 +328,38 @@ describe('review', () => {
     expect(summarize({ ...at, base: ' ' }).next?.command).toBe('/code-review main')
   })
 })
+
+describe('bug flow', () => {
+  const diagnose = parseInvocation('diagnosing-bugs', 'checkout total is wrong')!
+
+  test('diagnose, then retro, then an optional architecture follow-up', () => {
+    const s = summarize(project({ flow: 'bug' }))
+    expect(s.next?.command).toBe('/diagnosing-bugs')
+    expect(s.next?.hint).toBe('No theories until one command goes red on this bug.')
+    expect(s.rows.map(r => r.kind)).toEqual(['step', 'step', 'optional'])
+    const after = summarize(project({ flow: 'bug', runs: ran('diagnosing-bugs') }))
+    expect(after.next?.hint).toBe('Ask what would have prevented this bug, in this same session.')
+  })
+
+  test('a diagnosis with no flow picks the Bug flow', () => {
+    const { project: after, toast } = record(project({ flow: null }), diagnose, [])
+    expect(after.flow).toBe('bug')
+    expect(toast).toBe('Diagnose done. Next: retro')
+  })
+
+  test('a diagnosis after a finished flow starts the Bug flow afresh', () => {
+    const done = project({ flow: 'quick', runs: ran('grill-with-docs', 'to-spec', 'implement', 'code-review', 'retro') })
+    const { project: after } = record(done, diagnose, [])
+    expect(after.flow).toBe('bug')
+    expect(after.runs).toHaveLength(1)
+  })
+
+  test('a diagnosis mid-build is a detour that keeps the flow where it is', () => {
+    const { project: after, toast } = record(project({ runs: ran('grill-with-docs') }), diagnose, [])
+    expect(after.flow).toBe('full')
+    expect(toast).toBe('Diagnosed a bug. Back to: spec')
+    const s = summarize(after)
+    expect(s.next?.step.id).toBe('spec')
+    expect(s.rows.findIndex(r => r.kind === 'detour')).toBe(s.rows.findIndex(r => r.kind === 'step' && r.step === 'spec') + 1)
+  })
+})

@@ -329,3 +329,27 @@ test('mobile shows the base as text', async ($, on) => {
   await ui.press({ key: 'reset' })
   await ui.unmount()
 })
+
+test('a diagnosis with no flow starts the Bug flow, which has no Feature field', async ($, on) => {
+  on('tool.call', skillOk)
+  world(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await $.tool.call({ tool: 'Skill', skill: 'mattpocock-skills:diagnosing-bugs', args: 'totals are wrong' })
+  expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/retro')
+  expect(await ui.find({ key: 'feature' })).toBeUndefined()
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})
+
+test('a diagnosis mid-build shows as a detour', async ($, on) => {
+  on('tool.call', skillOk)
+  world(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.select({ key: 'flow', value: 'quick' })
+  await $.tool.call({ tool: 'Skill', skill: 'grilling', args: '' })
+  await $.tool.call({ tool: 'Skill', skill: 'diagnosing-bugs', args: '' })
+  expect(await ui.find({ type: 'Text', text: /Diagnosed a bug/ })).toBeDefined()
+  expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/to-spec')
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})

@@ -4,9 +4,9 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Bug flow: `/diagnosing-bugs` (hint "No theories until one command goes red on this bug."), `/retro` (hint "Ask what would have prevented this bug, in this same session."), optional `/improve-codebase-architecture`
-- [ ] No Feature field on the Bug flow
-- [ ] A diagnose run with no flow, or a complete one, picks the Bug flow
-- [ ] A diagnose run during an unfinished Full or Quick flow adds a dim "Diagnosed a bug" row after the current step and toasts, without moving the flow
+- [x] Bug flow: `/diagnosing-bugs` (hint "No theories until one command goes red on this bug."), `/retro` (hint "Ask what would have prevented this bug, in this same session."), optional `/improve-codebase-architecture`
+- [x] No Feature field on the Bug flow
+- [x] A diagnose run with no flow, or a complete one, picks the Bug flow
+- [x] A diagnose run during an unfinished Full or Quick flow adds a dim "Diagnosed a bug" row after the current step and toasts, without moving the flow
