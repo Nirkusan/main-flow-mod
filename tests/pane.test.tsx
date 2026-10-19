@@ -119,3 +119,13 @@ test('/main-flow says the pane opened where it is placed', async ($, on) => {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   expect((await $.command.run({ ...COMMAND, args: '' })).text).toBe('Main flow pane opened.')
 })
+
+test('an alias from the settings counts as its step', { options: { aliases: 'grill=interview-me' } }, async ($, on) => {
+  on('tool.call', skillOk)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.select({ key: 'flow', value: 'quick' })
+  await $.tool.call({ tool: 'Skill', skill: 'my-plugin:interview-me', args: '' })
+  expect((await ui.find({ type: 'Code' }))?.props.source).toBe('/to-spec')
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})

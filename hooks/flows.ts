@@ -97,6 +97,23 @@ export const flowById = (id: FlowId): Flow => FLOWS.find(f => f.id === id) ?? FL
 
 export const isFlowId = (value: string): value is FlowId => FLOWS.some(f => f.id === value)
 
+const STEP_IDS = new Set<string>(FLOWS.flatMap(f => f.steps.map(s => s.id)))
+
+// The built-in aliases plus the setting's `step=name, step=name` entries; unreadable entries are skipped.
+export const aliasTable = (setting = ''): Readonly<Record<string, StepId>> => {
+  const extra: Record<string, StepId> = {}
+
+  for (const entry of setting.split(',')) {
+    const [step = '', name = ''] = entry.split('=').map(part => part.trim().toLowerCase())
+
+    if (STEP_IDS.has(step) && name !== '') {
+      extra[name.split(':').at(-1)!] = step as StepId
+    }
+  }
+
+  return { ...ALIASES, ...extra }
+}
+
 export type Invocation = { step: StepId; name: string; args: string }
 
 // A skill or slash command as the step it does, or undefined when it is not part of any flow.

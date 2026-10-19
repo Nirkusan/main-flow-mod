@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Project, Run } from '../types'
-import { describeFlow, parseInvocation, record, summarize } from '../hooks/flows'
+import { ALIASES, aliasTable, describeFlow, parseInvocation, record, summarize } from '../hooks/flows'
 
 const project = (over: Partial<Project> = {}): Project => ({
   flow: 'full',
@@ -26,6 +26,35 @@ describe('parseInvocation', () => {
 
   test('ignores commands outside the flow', () => {
     expect(parseInvocation('commit', '')).toBeUndefined()
+  })
+
+  test('reads a plugin-prefixed skill as its bare name', () => {
+    expect(parseInvocation('mattpocock-skills:grilling', '')?.step).toBe('grill')
+  })
+
+  test('every interview skill counts as the grill step', () => {
+    expect(['grill-with-docs', 'grill-me', 'grilling'].map(n => parseInvocation(n, '')?.step)).toEqual(['grill', 'grill', 'grill'])
+  })
+
+  test('every way of building counts as the implement step', () => {
+    expect(['implement', 'implement-spec', 'tdd'].map(n => parseInvocation(n, '')?.step)).toEqual([
+      'implement',
+      'implement',
+      'implement',
+    ])
+  })
+})
+
+describe('aliasTable', () => {
+  test('adds the names from the setting to the built-in ones', () => {
+    const table = aliasTable('implement=build-it, spec = Write-Spec')
+    expect(parseInvocation('build-it', '', table)?.step).toBe('implement')
+    expect(parseInvocation('write-spec', '', table)?.step).toBe('spec')
+    expect(parseInvocation('grilling', '', table)?.step).toBe('grill')
+  })
+
+  test('ignores entries it cannot read', () => {
+    expect(aliasTable('nonsense, colour=red, =x, review=')).toEqual(ALIASES)
   })
 })
 

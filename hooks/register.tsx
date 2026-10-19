@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { Project } from '../types'
-import { FLOWS, describeFlow, isFlowId, parseInvocation, record, summarize } from './flows'
+import type { Project, StepId } from '../types'
+import { FLOWS, aliasTable, describeFlow, isFlowId, parseInvocation, record, summarize } from './flows'
 import type { Row, Summary, Ticket } from './flows'
 
 const PANE = 'main-flow'
@@ -18,8 +18,8 @@ const change = async ($: EngineInterface, fn: (p: Project) => Project) => {
 
 const tickets = async (_$: EngineInterface): Promise<Ticket[]> => []
 
-const run = async ($: EngineInterface, command: string, args: string) => {
-  const invocation = parseInvocation(command, args)
+const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>, command: string, args: string) => {
+  const invocation = parseInvocation(command, args, aliases)
 
   if (invocation === undefined) {
     return
@@ -61,7 +61,9 @@ const textBar = (s: Summary, columns: number) => {
 
 const MARKS = { done: '✓', current: '●', skipped: '–', todo: '○' } as const
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const aliases = aliasTable(typeof options.aliases === 'string' ? options.aliases : '')
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'main-flow',
@@ -92,7 +94,7 @@ export const register: Register = on => {
   // The person typing a slash command.
   on('prompt.submit', async ($, e, next) => {
     if (e.command !== undefined) {
-      await run($, e.command.name, e.command.args)
+      await run($, aliases, e.command.name, e.command.args)
     }
 
     return next(e)
@@ -103,7 +105,7 @@ export const register: Register = on => {
     const ran = await next(e)
 
     if (ran.deny === undefined && ran.isError !== true) {
-      await run($, e.skill, e.args ?? '')
+      await run($, aliases, e.skill, e.args ?? '')
     }
 
     return ran

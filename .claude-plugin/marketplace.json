@@ -1,5 +1,13 @@
 {
   "name": "main-flow",
-  "owner": { "name": "Nirkusan" },
-  "plugins": [{ "name": "main-flow", "source": "./" }]
+  "description": "A Claude Code pane that tracks Matt Pocock's main flow and suggests the next command",
+  "owner": {
+    "name": "Nirkusan"
+  },
+  "plugins": [
+    {
+      "name": "main-flow",
+      "source": "./"
+    }
+  ]
 }

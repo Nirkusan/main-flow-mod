@@ -4,8 +4,8 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `mattpocock-skills:grilling` counts the same as `grilling`
-- [ ] Built-in aliases: grill = grill-with-docs, grill-me, grilling; implement = implement, implement-spec, tdd; spec = to-spec; tickets = to-tickets; review = code-review; retro = retro; prototype = prototype
-- [ ] A `userConfig` string field `aliases` in the form `step=name, step=name` adds names; malformed entries are ignored
+- [x] `mattpocock-skills:grilling` counts the same as `grilling`
+- [x] Built-in aliases: grill = grill-with-docs, grill-me, grilling; implement = implement, implement-spec, tdd; spec = to-spec; tickets = to-tickets; review = code-review; retro = retro; prototype = prototype
+- [x] A `userConfig` string field `aliases` in the form `step=name, step=name` adds names; malformed entries are ignored
