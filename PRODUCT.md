@@ -33,7 +33,7 @@ It knows the main flow's real rules: the Full and Quick branches, one `/implemen
 ## Capabilities and Constraints
 
 - Surfaces: terminal (no Svg), desktop, vscode, mobile (no Input or Select). Branch on the surface, not on whether an element exists.
-- Colour is limited to the host's theme, `dimColor`, and the `claude` accent; no custom palette.
+- Colour is limited to the host's theme, `dimColor`, and the `claude` accent; no custom palette. The one exception is the Svg progress bar, which takes no theme token, so it repeats the accent (`#d97757`) and a neutral track (`#8080804d`).
 - Terminology follows CONTEXT.md: Flow, Step, Run, Ticket, Feature, Base, Alias, Project.
 
 ## Brand Commitments

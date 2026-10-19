@@ -3,9 +3,12 @@ import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import type { Project, Run, StepId, Ticket } from '../types'
 import {
+  DEFAULT_BASE,
   FLOWS,
+  MARKS,
   aliasTable,
   catchUp,
+  commandFor,
   describeFlow,
   isFlowId,
   parseInvocation,
@@ -19,7 +22,7 @@ import type { Message, Row, Summary } from './flows'
 const PANE = 'main-flow'
 const TITLE = 'Main flow'
 
-const EMPTY: Project = { flow: null, runs: [], feature: '', base: 'main', ticketCount: 0 }
+const EMPTY: Project = { flow: null, runs: [], feature: '', base: DEFAULT_BASE, ticketCount: 0 }
 
 const PROJECT = { plugin: 'main-flow', key: 'project' } as const
 const project = atom(PROJECT, EMPTY)
@@ -48,14 +51,13 @@ const change = async ($: EngineInterface, fn: (p: Project) => Project) => {
   await $.store.set(storeKey(cwd), await read($, project))
 }
 
-const current = async ($: EngineInterface) => {
+const loadProject = async ($: EngineInterface) => {
   const held = await $.state.get(PROJECT)
 
   return held.version === 0 ? saved($, await $.session.cwd()) : (held.value ?? EMPTY)
 }
 
 const TICKETS = { plugin: 'main-flow', key: 'tickets' } as const
-const tickets = atom(TICKETS, [])
 const PENDING = { plugin: 'main-flow', key: 'pendingFeature' } as const
 const pendingFeature = atom(PENDING, null)
 
@@ -76,50 +78,72 @@ const readTicket = async ($: EngineInterface, cwd: string, dir: string, file: st
   }
 }
 
-// Reads the feature's ticket files, filling Feature in when `.scratch` holds exactly one feature with tickets.
-const scan = async ($: EngineInterface) => {
-  let { feature } = await current($)
-  const cwd = await $.session.cwd()
-  const root = `${cwd}/.scratch`
-
+const readTickets = async ($: EngineInterface, feature: string) => {
   if (feature === '') {
-    const features: string[] = []
+    return []
+  }
 
-    for (const entry of await listDir($, root)) {
-      const inside = entry.kind === 'dir' ? await listDir($, `${root}/${entry.name}`) : []
+  const cwd = await $.session.cwd()
+  const dir = `.scratch/${feature}/issues`
+  const files = (await listDir($, `${cwd}/${dir}`)).filter(e => e.kind === 'file')
+  const found = (await Promise.all(files.map(e => readTicket($, cwd, dir, e.name)))).filter(t => t !== undefined)
 
-      if (inside.some(f => (f.name === 'issues' && f.kind === 'dir') || f.name === 'spec.md')) {
-        features.push(entry.name)
-      }
-    }
+  return found.sort((a, b) => Number(a.id) - Number(b.id))
+}
 
-    if (features.length === 1) {
-      feature = features[0]!
-      await change($, p => ({ ...p, feature }))
+// The one folder in `.scratch` holding a spec or tickets, or '' when there are none or several.
+const onlyFeature = async ($: EngineInterface) => {
+  const root = `${await $.session.cwd()}/.scratch`
+  const features: string[] = []
+
+  for (const entry of await listDir($, root)) {
+    const inside = entry.kind === 'dir' ? await listDir($, `${root}/${entry.name}`) : []
+
+    if (inside.some(f => (f.name === 'issues' && f.kind === 'dir') || f.name === 'spec.md')) {
+      features.push(entry.name)
     }
   }
 
-  const dir = `.scratch/${feature}/issues`
-  const entries = feature === '' ? [] : (await listDir($, `${root}/${feature}/issues`)).filter(e => e.kind === 'file')
-  const found = (await Promise.all(entries.map(e => readTicket($, cwd, dir, e.name)))).filter(t => t !== undefined)
-  await $.state.set(TICKETS, found.sort((a, b) => Number(a.id) - Number(b.id)))
+  return features.length === 1 ? features[0]! : ''
+}
+
+// Reads the feature's ticket files, filling Feature in first when it is empty; says whether it filled it.
+const scan = async ($: EngineInterface) => {
+  let { feature } = await loadProject($)
+  const isFilled = feature === '' && (feature = await onlyFeature($)) !== ''
+
+  if (isFilled) {
+    await change($, p => ({ ...p, feature }))
+  }
+
+  await $.state.set(TICKETS, await readTickets($, feature))
+
+  return isFilled
+}
+
+// The tickets as last scanned; after a /clear, when the session's values start over, read from the files again.
+const knownTickets = async ($: EngineInterface) => {
+  const held = await $.state.get(TICKETS)
+
+  return held.version === 0 ? readTickets($, (await loadProject($)).feature) : (held.value ?? [])
 }
 
 // Adds progress made before the pane was watching: earlier in this transcript, or in the feature's files.
-const pickUp = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>) => {
-  const p = await current($)
+// A new feature takes nothing from the transcript, which is about the old one.
+const pickUp = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>, from: 'session' | 'files') => {
+  const p = await loadProject($)
   let messages: Message[] = []
   let hasSpec = false
 
   try {
-    messages = (await $.session.messages()) as Message[]
+    messages = from === 'session' ? ((await $.session.messages()) as Message[]) : []
   } catch {}
 
   try {
     hasSpec = p.feature !== '' && (await $.fs.exists(`${await $.session.cwd()}/.scratch/${p.feature}/spec.md`))
   } catch {}
 
-  const { project: caught, picked } = catchUp(p, await read($, tickets), { messages, hasSpec }, aliases)
+  const { project: caught, picked } = catchUp(p, await knownTickets($), { messages, hasSpec }, aliases)
 
   if (picked.length > 0) {
     await change($, () => caught)
@@ -134,7 +158,7 @@ const setFeature = async (
   keepProgress?: boolean,
 ) => {
   const feature = value.trim()
-  const p = await current($)
+  const p = await loadProject($)
 
   if (feature === p.feature) {
     return
@@ -149,7 +173,7 @@ const setFeature = async (
   await $.state.set(PENDING, null)
   await change($, q => ({ ...q, feature, runs: keepProgress ? q.runs : [] }))
   await scan($)
-  await pickUp($, aliases)
+  await pickUp($, aliases, 'files')
 }
 
 const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>, command: string, args: string) => {
@@ -159,7 +183,7 @@ const run = async ($: EngineInterface, aliases: Readonly<Record<string, StepId>>
     return
   }
 
-  const known = await read($, tickets)
+  const known = await knownTickets($)
   let toast: string | undefined
   await change($, p => {
     const result = record(p, invocation, known, resolveTicket(invocation, p, known))
@@ -193,15 +217,13 @@ const textBar = (s: Summary, columns: number) => {
   return '━'.repeat(filled) + '─'.repeat(width - filled)
 }
 
-const MARKS = { done: '✓', current: '●', skipped: '–', todo: '○' } as const
-
 export const register: Register = (on, options) => {
   const aliases = aliasTable(typeof options.aliases === 'string' ? options.aliases : '')
 
   on('session.start', async ($, e, next) => {
     await $.state.set(PROJECT, await saved($, e.cwd))
     await scan($)
-    await pickUp($, aliases)
+    await pickUp($, aliases, 'session')
     await $.command.register({
       name: 'main-flow',
       description: 'Show the main flow and the next command',
@@ -225,7 +247,7 @@ export const register: Register = (on, options) => {
 
     const opened = await $.ui.open({ id: PANE, title: TITLE })
 
-    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await current($), await read($, tickets)) }
+    return { text: opened.isPlaced ? 'Main flow pane opened.' : describeFlow(await loadProject($), await knownTickets($)) }
   })
 
   // The person typing a slash command.
@@ -240,7 +262,10 @@ export const register: Register = (on, options) => {
   // Ticket files appear and change while Claude works, so read them again after each turn.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    await scan($)
+
+    if (await scan($)) {
+      await pickUp($, aliases, 'files')
+    }
 
     return done
   }).catch(($, e, next) => next(e))
@@ -259,12 +284,12 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
     const { Box, Button, Code, Text } = els
-    // The mobile app draws no Input or Select, the terminal no Svg.
+    // The mobile app draws no Input or Select, the terminal no Svg; `in els` only narrows the table's type.
     const Input = e.surface !== 'mobile' && 'Input' in els ? els.Input : undefined
     const Select = e.surface !== 'mobile' && 'Select' in els ? els.Select : undefined
     const Svg = e.surface !== 'terminal' && 'Svg' in els ? els.Svg : undefined
-    const p = await current($)
-    const known = await read($, tickets)
+    const p = await loadProject($)
+    const known = await knownTickets($)
     const pending = await read($, pendingFeature)
 
     const header = (
@@ -314,13 +339,13 @@ export const register: Register = (on, options) => {
                 Start here
               </Text>
             </Box>
-            <Code source="/grill-with-docs" language="text" wrap="wrap" />
+            <Code source={commandFor('grill', p)} language="text" wrap="wrap" />
             <Text dimColor>Get interviewed about the plan. Running it picks Full; switch any time.</Text>
             <Button
               key="copy"
               label="Copy command"
               variant="primary"
-              onPress={press => copy($, '/grill-with-docs', press.surface)}
+              onPress={press => copy($, commandFor('grill', p), press.surface)}
             />
           </Box>
         </Box>
@@ -379,7 +404,7 @@ export const register: Register = (on, options) => {
               label="Base"
               placeholder="Branch or commit to compare against"
               value={p.base}
-              onSubmit={(value: string) => change($, q => ({ ...q, base: value.trim() || 'main' }))}
+              onSubmit={(value: string) => change($, q => ({ ...q, base: value.trim() || DEFAULT_BASE }))}
             />
           ) : (
             <Text dimColor>{`Base: ${p.base}`}</Text>

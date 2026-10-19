@@ -85,6 +85,8 @@ const COMMANDS: Record<StepId, string> = {
   architecture: '/improve-codebase-architecture',
 }
 
+export const DEFAULT_BASE = 'main'
+
 export const flowById = (id: FlowId): Flow => FLOWS.find(f => f.id === id) ?? FLOWS[0]!
 
 export const isFlowId = (value: string): value is FlowId => FLOWS.some(f => f.id === value)
@@ -123,9 +125,12 @@ export const parseInvocation = (
 // Runs the pane records for a command: `tdd` never marks a ticket, since /implement runs it itself.
 const ticketless = (run: Run) => run.name === 'tdd'
 
+export type TicketState = 'done' | 'skipped'
+
 type Replay = {
   statuses: Status[]
-  tickets: Map<string, 'done' | 'skipped'>
+  tickets: Map<string, TicketState>
+  // Implement runs that name no ticket: how far a build without ticket files has got.
   builds: number
   // Indexes of the step that was current when a bug was diagnosed mid-flow.
   detours: number[]
@@ -137,25 +142,25 @@ export type Progress = {
   flow: Flow
   statuses: Status[]
   current: number | undefined
-  ticketState: ReadonlyMap<string, 'done' | 'skipped'>
+  ticketState: ReadonlyMap<string, TicketState>
   builds: number
   detours: number[]
   nextTicket: Ticket | undefined
 }
 
-const implementDone = (project: Project, tickets: readonly Ticket[], r: Pick<Replay, 'tickets' | 'builds'>) => {
+const implementDone = (project: Project, tickets: readonly Ticket[], replay: Pick<Replay, 'tickets' | 'builds'>) => {
   if (project.flow !== 'full') {
-    return r.builds > 0
+    return replay.builds > 0
   }
 
   if (tickets.length > 0) {
-    return tickets.every(t => r.tickets.has(t.id))
+    return tickets.every(t => replay.tickets.has(t.id))
   }
 
-  return project.ticketCount > 0 ? r.builds >= project.ticketCount : r.builds > 0
+  return project.ticketCount > 0 ? replay.builds >= project.ticketCount : replay.builds > 0
 }
 
-const frontier = (tickets: readonly Ticket[], state: ReadonlyMap<string, unknown>) => {
+const nextOpenTicket = (tickets: readonly Ticket[], state: ReadonlyMap<string, unknown>) => {
   const open = tickets.filter(t => !state.has(t.id))
 
   const isDone = (n: number) => {
@@ -170,18 +175,19 @@ const frontier = (tickets: readonly Ticket[], state: ReadonlyMap<string, unknown
 export const progress = (project: Project, tickets: readonly Ticket[] = []): Progress => {
   const flow = flowById(project.flow ?? 'full')
   const { steps } = flow
-  const r: Replay = { statuses: steps.map(() => 'todo'), tickets: new Map(), builds: 0, detours: [] }
-  const currentIndex = () => steps.findIndex((s, i) => !s.isOptional && !isPassed(r.statuses[i]!))
+  const replay: Replay = { statuses: steps.map(() => 'todo'), tickets: new Map(), builds: 0, detours: [] }
+  const currentIndex = () => steps.findIndex((s, i) => !s.isOptional && !isPassed(replay.statuses[i]!))
   const indexOf = (id: StepId) => steps.findIndex(s => s.id === id)
-  const passTo = (found: number, as: 'skipped' | 'done') => {
+  // Running a later step passes over the open steps before it.
+  const passTo = (found: number) => {
     for (let i = 0; i < found; i++) {
-      if (!steps[i]!.isOptional && r.statuses[i] === 'todo') {
-        r.statuses[i] = as
+      if (!steps[i]!.isOptional && replay.statuses[i] === 'todo') {
+        replay.statuses[i] = 'skipped'
       }
     }
   }
   const settleImplement = (i: number) => {
-    r.statuses[i] = implementDone(project, tickets, r) ? 'done' : 'todo'
+    replay.statuses[i] = implementDone(project, tickets, replay) ? 'done' : 'todo'
   }
 
   for (const run of project.runs) {
@@ -192,13 +198,16 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
         continue
       }
 
-      const ticket = steps[at]!.id === 'implement' && project.flow === 'full' ? frontier(tickets, r.tickets) : undefined
+      const ticket = steps[at]!.id === 'implement' && project.flow === 'full' ? nextOpenTicket(tickets, replay.tickets) : undefined
 
       if (ticket) {
-        r.tickets.set(ticket.id, 'skipped')
+        replay.tickets.set(ticket.id, 'skipped')
+        settleImplement(at)
+      } else if (steps[at]!.id === 'implement' && project.flow === 'full' && project.ticketCount > 0) {
+        replay.builds += 1
         settleImplement(at)
       } else {
-        r.statuses[at] = 'skipped'
+        replay.statuses[at] = 'skipped'
       }
 
       continue
@@ -209,7 +218,7 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
     if (i < 0) {
       if (run.step === 'diagnose') {
         const at = currentIndex()
-        r.detours.push(at < 0 ? steps.length - 1 : at)
+        replay.detours.push(at < 0 ? steps.length - 1 : at)
       }
 
       continue
@@ -219,29 +228,29 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
 
     if (run.by === 'hand') {
       if (run.ticket !== undefined) {
-        run.undo ? r.tickets.delete(run.ticket) : r.tickets.set(run.ticket, 'done')
+        run.undo ? replay.tickets.delete(run.ticket) : replay.tickets.set(run.ticket, 'done')
         settleImplement(i)
       } else if (step.isOptional) {
-        r.statuses[i] = run.undo ? 'todo' : 'done'
+        replay.statuses[i] = run.undo ? 'todo' : 'done'
       } else if (run.undo) {
-        r.statuses[i] = 'todo'
+        replay.statuses[i] = 'todo'
 
         if (step.id === 'implement') {
-          r.tickets.clear()
-          r.builds = 0
+          replay.tickets.clear()
+          replay.builds = 0
         }
       } else {
         // Marking a step by hand marks the steps before it too, except those skipped on purpose.
         steps.forEach((s, j) => {
-          if (s.isOptional || j > i || (j < i && r.statuses[j] !== 'todo')) {
+          if (s.isOptional || j > i || (j < i && replay.statuses[j] !== 'todo')) {
             return
           }
 
-          r.statuses[j] = 'done'
+          replay.statuses[j] = 'done'
 
           if (s.id === 'implement') {
-            tickets.forEach(t => r.tickets.has(t.id) || r.tickets.set(t.id, 'done'))
-            r.builds = Math.max(r.builds, project.ticketCount, 1)
+            tickets.forEach(t => replay.tickets.has(t.id) || replay.tickets.set(t.id, 'done'))
+            replay.builds = Math.max(replay.builds, project.ticketCount, 1)
           }
         })
       }
@@ -249,52 +258,62 @@ export const progress = (project: Project, tickets: readonly Ticket[] = []): Pro
       continue
     }
 
+    // /implement runs a review on every ticket, so a review counts only once implement is complete.
     if (step.id === 'review') {
       const implement = indexOf('implement')
 
-      if (implement >= 0 && r.statuses[implement] !== 'done') {
+      if (implement >= 0 && replay.statuses[implement] !== 'done') {
+        continue
+      }
+    }
+
+    // A retro closes the flow, so a stray one (after a detour, say) counts only once the step before it is passed.
+    if (step.id === 'retro') {
+      const before = steps.findLastIndex((s, j) => j < i && !s.isOptional)
+
+      if (before >= 0 && !isPassed(replay.statuses[before]!)) {
         continue
       }
     }
 
     if (step.isOptional) {
-      r.statuses[i] = 'done'
+      replay.statuses[i] = 'done'
       continue
     }
 
-    passTo(i, 'skipped')
+    passTo(i)
 
     if (step.id === 'implement') {
       if (run.ticket === '*') {
-        tickets.forEach(t => r.tickets.set(t.id, 'done'))
-        r.builds = Math.max(r.builds + 1, project.ticketCount)
+        tickets.forEach(t => replay.tickets.set(t.id, 'done'))
+        replay.builds = Math.max(replay.builds + 1, project.ticketCount)
       } else if (run.ticket !== undefined) {
-        r.tickets.set(run.ticket, 'done')
-      } else if (!ticketless(run) || r.builds === 0) {
-        r.builds += ticketless(run) && tickets.length > 0 ? 0 : 1
+        replay.tickets.set(run.ticket, 'done')
+      } else if (!ticketless(run) || replay.builds === 0) {
+        replay.builds += ticketless(run) && tickets.length > 0 ? 0 : 1
       }
 
       settleImplement(i)
       continue
     }
 
-    r.statuses[i] = 'done'
+    replay.statuses[i] = 'done'
   }
 
   const at = currentIndex()
 
   if (at >= 0) {
-    r.statuses[at] = 'current'
+    replay.statuses[at] = 'current'
   }
 
   return {
     flow,
-    statuses: r.statuses,
+    statuses: replay.statuses,
     current: at < 0 ? undefined : at,
-    ticketState: r.tickets,
-    builds: r.builds,
-    detours: r.detours,
-    nextTicket: project.flow === 'full' ? frontier(tickets, r.tickets) : undefined,
+    ticketState: replay.tickets,
+    builds: replay.builds,
+    detours: replay.detours,
+    nextTicket: project.flow === 'full' ? nextOpenTicket(tickets, replay.tickets) : undefined,
   }
 }
 
@@ -335,14 +354,16 @@ export const commandFor = (id: StepId, project: Pick<Project, 'base'>, ticket?: 
     return `${COMMANDS.implement} ${ticket.path}`
   }
 
-  return id === 'review' ? `${COMMANDS.review} ${project.base.trim() || 'main'}` : COMMANDS[id]
+  return id === 'review' ? `${COMMANDS.review} ${project.base.trim() || DEFAULT_BASE}` : COMMANDS[id]
 }
 
 export const summarize = (project: Project, tickets: readonly Ticket[] = []): Summary => {
   const p = progress(project, tickets)
   const { steps } = p.flow
   const isFull = project.flow === 'full'
+  // Tickets only count in the Full flow: the files' tickets, else the count set by hand.
   const total = isFull ? tickets.length || project.ticketCount : 0
+  const countsTickets = (id: StepId) => id === 'implement' && total > 0
   const doneTickets = tickets.length > 0 ? tickets.filter(t => p.ticketState.has(t.id)).length : Math.min(p.builds, total)
   const required = steps.flatMap((s, i) => (s.isOptional ? [] : [p.statuses[i]!]))
   const passed = required.filter(isPassed).length
@@ -356,7 +377,7 @@ export const summarize = (project: Project, tickets: readonly Ticket[] = []): Su
     if (step.isOptional) {
       rows.push({ kind: 'optional', step: step.id, label: step.label.toLowerCase(), isDone: status === 'done' })
     } else {
-      const count = step.id === 'implement' && total > 0 ? `${doneTickets} of ${total} done` : undefined
+      const count = countsTickets(step.id) ? `${doneTickets} of ${total} done` : undefined
       rows.push({ kind: 'step', step: step.id, label: step.label, status, ...(count && { count }) })
 
       if (step.id === 'implement' && status === 'current') {
@@ -385,7 +406,7 @@ export const summarize = (project: Project, tickets: readonly Ticket[] = []): Su
       step,
       command: commandFor(step.id, project, ticket),
       hint: step.hint,
-      skipLabel: step.id === 'implement' && isFull && total > 0 ? 'Skip ticket' : 'Skip step',
+      skipLabel: countsTickets(step.id) ? 'Skip ticket' : 'Skip step',
     }
 
     if (ticket) {
@@ -400,7 +421,7 @@ export const summarize = (project: Project, tickets: readonly Ticket[] = []): Su
         ...base,
         heading: step.label,
         meta: `Step ${stepNumber} of ${required.length}`,
-        ...(step.id === 'implement' && isFull && total > 0 && { sub: `Ticket ${Math.min(doneTickets + 1, total)} of ${total}` }),
+        ...(countsTickets(step.id) && { sub: `Ticket ${Math.min(doneTickets + 1, total)} of ${total}` }),
       }
     }
   }
@@ -439,6 +460,14 @@ export const parseTicket = (dir: string, file: string, text: string): Ticket | u
   }
 }
 
+// The ticket an /implement argument names: `03`, `3`, `#3`, `03-pay-button.md` or a path ending in one.
+const ticketNamed = (args: string, tickets: readonly Ticket[]) => {
+  const file = args.trim().split(/\s+/)[0]?.split('/').at(-1) ?? ''
+  const number = /^#?0*(\d+)(?=$|[-.])/.exec(file)?.[1]
+
+  return number === undefined ? undefined : tickets.find(t => Number(t.id) === Number(number))
+}
+
 // The ticket an /implement run builds: the one its argument names, else the next one; `*` for all of them.
 export const resolveTicket = (invocation: Invocation, project: Project, tickets: readonly Ticket[]) => {
   if (tickets.length === 0 || invocation.step !== 'implement' || invocation.name === 'tdd') {
@@ -449,10 +478,7 @@ export const resolveTicket = (invocation: Invocation, project: Project, tickets:
     return '*'
   }
 
-  const named = /(?:^|[\s/#])0*(\d+)(?=$|[-\s.])/.exec(invocation.args)?.[1]
-  const ticket = named === undefined ? undefined : tickets.find(t => Number(t.id) === Number(named))
-
-  return ticket?.id ?? progress(project, tickets).nextTicket?.id
+  return ticketNamed(invocation.args, tickets)?.id ?? progress(project, tickets).nextTicket?.id
 }
 
 // A transcript message as `$.session.messages()` returns it, as far as catch-up reads it.
@@ -487,27 +513,33 @@ const invocationsIn = (messages: readonly Message[], aliases: Readonly<Record<st
 
 const DONE_STATUSES = new Set(['resolved', 'done', 'closed', 'complete', 'completed'])
 
-const score = (s: Summary) =>
-  s.requiredDone * 10_000 + s.tickets.done * 10 + s.rows.filter(r => r.kind === 'optional' && r.isDone).length
+const optionalDone = (s: Summary) => s.rows.filter(r => r.kind === 'optional' && r.isDone).length
+
+// Whether `after` is further along than `before`: more steps passed, else more tickets, else more optional steps.
+const advances = (before: Summary, after: Summary) =>
+  after.requiredDone !== before.requiredDone
+    ? after.requiredDone > before.requiredDone
+    : after.tickets.done !== before.tickets.done
+      ? after.tickets.done > before.tickets.done
+      : optionalDone(after) > optionalDone(before)
 
 // Progress made before the pane was watching, from the transcript and the feature's files. It only ever adds.
 export const catchUp = (
   project: Project,
   tickets: readonly Ticket[],
-  found: { messages: readonly Message[]; hasSpec: boolean },
+  evidence: { messages: readonly Message[]; hasSpec: boolean },
   aliases: Readonly<Record<string, StepId>> = ALIASES,
 ): { project: Project; picked: string[] } => {
   const candidates: Run[] = []
 
-  for (const invocation of invocationsIn(found.messages, aliases)) {
+  for (const invocation of invocationsIn(evidence.messages, aliases)) {
     if (invocation.step === 'diagnose' || invocation.name === 'tdd') {
       continue
     }
 
     if (invocation.step === 'implement' && tickets.length > 0) {
       // Only a reference names its ticket for sure; a bare /implement may already be counted.
-      const named = invocation.name === 'implement-spec' ? '*' : /(?:^|[\s/#])0*(\d+)(?=$|[-\s.])/.exec(invocation.args)?.[1]
-      const id = named === '*' ? '*' : tickets.find(t => named !== undefined && Number(t.id) === Number(named))?.id
+      const id = invocation.name === 'implement-spec' ? '*' : ticketNamed(invocation.args, tickets)?.id
 
       if (id !== undefined) {
         candidates.push({ step: 'implement', name: invocation.name, ticket: id, by: 'catch-up' })
@@ -523,7 +555,7 @@ export const catchUp = (
     candidates.push({ step: invocation.step, name: invocation.name, by: 'catch-up' })
   }
 
-  if (found.hasSpec) {
+  if (evidence.hasSpec) {
     candidates.push({ step: 'spec', name: 'to-spec', by: 'catch-up' })
   }
 
@@ -535,34 +567,43 @@ export const catchUp = (
     candidates.push({ step: 'implement', name: 'implement', ticket: t.id, by: 'catch-up' })
   }
 
-  let current: Project = project
+  let caught: Project = project
   const picked: string[] = []
   let ticketsPicked = 0
+  let pending = candidates
 
-  for (const run of candidates) {
-    const trial: Project = { ...current, flow: current.flow ?? 'full', runs: [...current.runs, run] }
-    const before = summarize(current, tickets)
-    const after = summarize(trial, tickets)
+  // A second pass picks up what the first unlocked, such as a review gated until the tickets were in.
+  for (let pass = 0; pass < 2 && pending.length > 0; pass++) {
+    const left: Run[] = []
 
-    if (score(after) <= score(before)) {
-      continue
+    for (const run of pending) {
+      const trial: Project = { ...caught, flow: caught.flow ?? 'full', runs: [...caught.runs, run] }
+      const before = summarize(caught, tickets)
+      const after = summarize(trial, tickets)
+
+      if (!advances(before, after)) {
+        left.push(run)
+        continue
+      }
+
+      caught = trial
+
+      if (run.ticket !== undefined) {
+        ticketsPicked += after.tickets.done - before.tickets.done
+      } else {
+        const label = after.flow.steps.find(s => s.id === run.step)?.label ?? run.step
+        picked.includes(label) || picked.push(label)
+      }
     }
 
-    current = trial
-
-    if (run.ticket !== undefined) {
-      ticketsPicked += after.tickets.done - before.tickets.done
-    } else {
-      const label = after.flow.steps.find(s => s.id === run.step)?.label ?? run.step
-      picked.includes(label) || picked.push(label)
-    }
+    pending = left
   }
 
   if (ticketsPicked > 0) {
     picked.push(`${ticketsPicked} ticket${ticketsPicked === 1 ? '' : 's'}`)
   }
 
-  return { project: current, picked }
+  return { project: caught, picked }
 }
 
 const STARTERS = new Set<StepId>(['grill', 'prototype', 'spec', 'tickets', 'implement', 'review', 'retro'])
@@ -577,27 +618,27 @@ export const record = (
   const run: Run = { step: invocation.step, name: invocation.name, ...(ticket !== undefined && { ticket }) }
   const before = project.flow === null ? undefined : summarize(project, tickets)
 
-  if (invocation.step === 'diagnose' && project.flow !== 'bug' && (before === undefined || before.isComplete)) {
+  if (invocation.step === 'diagnose' && (before === undefined || before.isComplete)) {
     const after = { ...project, flow: 'bug' as const, runs: [run] }
 
-    return { project: after, toast: toastFor(undefined, summarize(after, tickets)) }
+    return { project: after, toast: toastFor(undefined, summarize(after, tickets), run) }
   }
 
   if (project.flow === null && !STARTERS.has(invocation.step)) {
     return { project }
   }
 
-  const after: Project = { ...project, flow: project.flow ?? 'full', runs: [...project.runs, run].slice(-200) }
+  const after: Project = { ...project, flow: project.flow ?? 'full', runs: [...project.runs, run] }
   const summary = summarize(after, tickets)
 
   if (invocation.step === 'diagnose' && project.flow !== 'bug') {
     return { project: after, toast: `Diagnosed a bug. Back to: ${summary.next?.heading.toLowerCase() ?? 'the flow'}` }
   }
 
-  return { project: after, toast: toastFor(before, summary) }
+  return { project: after, toast: toastFor(before, summary, run) }
 }
 
-const toastFor = (before: Summary | undefined, after: Summary) => {
+const toastFor = (before: Summary | undefined, after: Summary, run: Run) => {
   const doneBefore = before?.requiredDone ?? 0
   const ticketsBefore = before?.tickets.done ?? 0
 
@@ -606,25 +647,25 @@ const toastFor = (before: Summary | undefined, after: Summary) => {
   }
 
   if (after.requiredDone > doneBefore) {
-    const label = before?.next?.step.label ?? after.flow.steps[0]!.label
+    const label = after.flow.steps.find(s => s.id === run.step)?.label ?? before?.next?.step.label ?? 'Step'
 
     return after.next ? `${label} done. Next: ${after.next.heading.toLowerCase()}` : `${label} done. Flow complete`
   }
 
-  if (after.tickets.done > ticketsBefore && before?.next?.ticket) {
-    return `Ticket ${before.next.ticket.id} done. Next: ${after.next?.heading ?? 'review'}`
+  if (after.tickets.done > ticketsBefore && run.ticket !== undefined && run.ticket !== '*') {
+    return `Ticket ${run.ticket} done. Next: ${after.next?.heading ?? 'review'}`
   }
 
   return undefined
 }
 
-const MARKS: Record<Status, string> = { done: '✓', current: '●', skipped: '–', todo: '○' }
+export const MARKS: Record<Status, string> = { done: '✓', current: '●', skipped: '–', todo: '○' }
 
 // The flow as plain text, for surfaces that cannot draw the pane.
 export const describeFlow = (project: Project, tickets: readonly Ticket[] = []): string => {
   if (project.flow === null) {
     return [
-      'No flow chosen. Pick one, or start with /grill-with-docs (it picks Full):',
+      `No flow chosen. Pick one, or start with ${COMMANDS.grill} (it picks Full):`,
       ...FLOWS.map(f => `  /main-flow ${f.id}  ${f.summary}`),
     ].join('\n')
   }
@@ -645,7 +686,7 @@ export const describeFlow = (project: Project, tickets: readonly Ticket[] = []):
   })
 
   if (s.next === undefined) {
-    return [head, '', 'Flow complete. /main-flow reset to start again.', '', ...list].join('\n')
+    return [head, '', 'Flow complete. Start again in the pane, or /main-flow reset to clear everything.', '', ...list].join('\n')
   }
 
   const place = s.next.meta ? ` (${s.next.meta.toLowerCase()})` : s.next.sub ? ` (${s.next.sub.toLowerCase()})` : ''

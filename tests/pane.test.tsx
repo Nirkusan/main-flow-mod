@@ -376,3 +376,43 @@ test('a session that already ran main-flow commands is picked up at start', asyn
   await ui.press({ key: 'reset' })
   await ui.unmount()
 })
+
+test('after a /clear the tickets are read from the files again', async ($, on) => {
+  on('tool.call', skillOk)
+  // A /clear starts the session's values over without a session start; the store still holds the project.
+  mock.store(on, {
+    'project:/work/shop': {
+      flow: 'full',
+      feature: 'checkout',
+      base: 'main',
+      ticketCount: 0,
+      runs: [
+        { step: 'grill', name: 'grill-with-docs' },
+        { step: 'spec', name: 'to-spec' },
+        { step: 'tickets', name: 'to-tickets' },
+        { step: 'implement', name: 'implement', ticket: '01' },
+      ],
+    },
+  })
+  on('session.cwd', () => ({ value: '/work/shop' }))
+  files(on, CHECKOUT)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: '02 Cart API' })).toBeDefined()
+  await $.tool.call({ tool: 'Skill', skill: 'implement', args: '.scratch/checkout/issues/02-cart-api.md' })
+  expect(await ui.find({ type: 'Text', text: '03 Pay button' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('clearing progress for a new feature takes nothing from the old transcript', async ($, on) => {
+  on('tool.call', skillOk)
+  world(on)
+  on('session.messages', () => ({ value: [{ role: 'user', text: '<command-name>/grill-with-docs</command-name>', toolUses: [] }] }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.select({ key: 'flow', value: 'full' })
+  await $.tool.call({ tool: 'Skill', skill: 'grilling', args: '' })
+  await ui.input({ key: 'feature', text: 'search' })
+  await ui.press({ key: 'feature-clear' })
+  expect(await ui.find({ type: 'Text', text: 'Step 1 of 6' })).toBeDefined()
+  await ui.press({ key: 'reset' })
+  await ui.unmount()
+})

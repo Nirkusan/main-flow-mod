@@ -427,3 +427,59 @@ describe('catchUp', () => {
     expect(picked).toEqual(['1 ticket'])
   })
 })
+
+describe('review fixes', () => {
+  test('a stray retro does not finish a flow whose earlier steps are open', () => {
+    const s = summarize(project({ runs: ran('grill-with-docs', 'retro') }))
+    expect(s.isComplete).toBe(false)
+    expect(s.next?.step.id).toBe('spec')
+  })
+
+  test('a diagnosis after a finished Bug flow starts a new one', () => {
+    const done = project({ flow: 'bug', runs: ran('diagnosing-bugs', 'retro') })
+    const { project: after } = record(done, parseInvocation('diagnosing-bugs', '')!, [])
+    expect(after.runs).toHaveLength(1)
+    expect(summarize(after).next?.step.id).toBe('retro')
+  })
+
+  test('with a ticket count, skip ticket passes one ticket, not the step', () => {
+    const at = project({ ticketCount: 3, runs: [...ran('grill-with-docs', 'to-spec', 'to-tickets'), { step: 'skip', name: 'skip' }] })
+    expect(summarize(at).next?.sub).toBe('Ticket 2 of 3')
+  })
+
+  test('an out-of-order /implement toasts the ticket it built', () => {
+    const { toast } = record(atImplement(), parseInvocation('implement', '04')!, TICKETS, '04')
+    expect(toast).toBe('Ticket 04 done. Next: 01 Cart model')
+  })
+
+  test('the first command with no flow toasts its own step', () => {
+    const { toast } = record(project({ flow: null }), parseInvocation('to-spec', '')!, [])
+    expect(toast).toBe('Spec done. Next: tickets')
+  })
+
+  test('a ticket path is read by its file name, not the feature folder', () => {
+    const tickets = [ticket('01', 'Cart model'), ticket('03', 'Pay button')].map(t => ({
+      ...t,
+      path: t.path.replace('checkout', '2024-shop'),
+    }))
+    expect(resolveTicket(parseInvocation('implement', '.scratch/2024-shop/issues/03-pay-button.md')!, atImplement(), tickets)).toBe('03')
+  })
+
+  test('catch-up counts a transcript review once the files show every ticket done', () => {
+    const done = TICKETS.map(t => ({ ...t, status: 'resolved' }))
+    const typed = (name: string) => ({ role: 'user' as const, text: `<command-name>/${name}</command-name>`, toolUses: [] })
+    const { project: after } = catchUp(project({ flow: 'full' }), done, {
+      messages: [typed('grill-with-docs'), typed('code-review')],
+      hasSpec: true,
+    })
+    expect(summarize(after, done).next?.step.id).toBe('retro')
+  })
+
+  test('long builds keep every run', () => {
+    let at = atImplement()
+    for (let i = 0; i < 250; i++) {
+      at = record(at, parseInvocation('prototype', '')!, []).project
+    }
+    expect(at.runs.length).toBe(253)
+  })
+})
