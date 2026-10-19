@@ -24,6 +24,16 @@ One recorded use of a main-flow command, whether you typed it or Claude invoked 
 One buildable slice of a spec, produced by `/to-tickets` and built by one `/implement`.
 _Avoid_: issue, task (an issue is where a ticket lives on a tracker, not the ticket itself)
 
+**Feature**:
+The short name of what is being built, such as `checkout`. In the Full flow it names the folder the tickets live in.
+_Avoid_: target (each step takes a different argument, so no one target fits)
+
+**Base**:
+The fixed point a code review compares against, `main` unless changed.
+
+**Alias**:
+Another skill name that counts as a step's command, such as `grilling` for the grill step.
+
 **Project**:
 The folder a session runs in. Progress belongs to a project and outlives the session.
 
